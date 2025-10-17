@@ -33,11 +33,6 @@ contract TokenHandler is  ITokenHandler, Ownable {
         _;
     }
 
-    modifier GovernanceOrGenesisManager() {
-        require(IPermissionsRegistry(permissionRegistry).hasRole("GENESIS_MANAGER", msg.sender) || IPermissionsRegistry(permissionRegistry).hasRole("GOVERNANCE",msg.sender), 'GOVERNANCE GENESIS_MANAGER');
-        _;
-    }
-
     constructor(address _permissionRegistry) {
         permissionRegistry = _permissionRegistry;
     }
@@ -50,14 +45,14 @@ contract TokenHandler is  ITokenHandler, Ownable {
     }
 
     /// @notice Whitelist a token for gauge creation
-    function whitelistTokens(address[] memory _tokens) external GovernanceOrGenesisManager {
+    function whitelistTokens(address[] memory _tokens) external Governance {
         uint256 i = 0;
         for(i = 0; i < _tokens.length; i++){
             _whitelist(_tokens[i]);
         }
     }
 
-    function whitelistToken(address _token) external GovernanceOrGenesisManager {
+    function whitelistToken(address _token) external Governance {
         _whitelist(_token);
     }
        
@@ -70,14 +65,14 @@ contract TokenHandler is  ITokenHandler, Ownable {
     }
     
     /// @notice Blacklist a malicious token
-    function blacklistTokens(address[] memory _token) external GovernanceOrGenesisManager {
+    function blacklistTokens(address[] memory _token) external Governance {
         uint256 i = 0;
         for(i = 0; i < _token.length; i++){
             _blacklist(_token[i]);
         }
     }
 
-    function blacklistToken(address _token) external GovernanceOrGenesisManager {
+    function blacklistToken(address _token) external Governance {
         _blacklist(_token);
     }
        

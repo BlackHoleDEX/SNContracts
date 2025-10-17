@@ -11,7 +11,7 @@ import {IVotingEscrow} from "./interfaces/IVotingEscrow.sol";
 import {IVoter} from "./interfaces/IVoter.sol";
 import {IAutomatedVotingManager} from "./interfaces/IAutomatedVotingManager.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
-import {VotingDelegationLib} from "./libraries/VotingDelegationLib.sol";
+import {IVotingDelegation} from "./interfaces/IVotingDelegation.sol";
 import {VotingBalanceLogic} from "./libraries/VotingBalanceLogic.sol";
 
 /// @title Voting Escrow
@@ -82,7 +82,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     address public avm;
     // address public burnTokenAddress=0x000000000000000000000000000000000000dEaD;
 
-    uint public SMNFT_BONUS = 1000;
+    uint public constant SMNFT_BONUS = 1000;
     uint public PRECISISON = 10000;
 
     /// @dev Mapping of interface id to bool about whether or not it's supported
@@ -106,19 +106,20 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     int128 internal iMAXTIME;
     IBlack public _black;
 
-    // Instance of the library's storage struct
-    VotingDelegationLib.Data private cpData;
+    IVotingDelegation public votingDelegation;
 
     VotingBalanceLogic.Data private votingBalanceLogicData;
 
     /// @notice Contract constructor
     /// @param token_addr `BLACK` token address
-    constructor(address token_addr, address art_proxy, address _avm) {
+    /// @param voting_delegation Address of VotingDelegation contract
+    constructor(address token_addr, address art_proxy, address _avm, address voting_delegation) {
         token = token_addr;
         voter = msg.sender;
         team = msg.sender;
         artProxy = art_proxy;
         avm = _avm;
+        votingDelegation = IVotingDelegation(voting_delegation);
         WEEK = BlackTimeLibrary.WEEK;
         MAXTIME = BlackTimeLibrary.MAX_LOCK_DURATION;
         iMAXTIME = int128(int256(BlackTimeLibrary.MAX_LOCK_DURATION));
@@ -227,7 +228,6 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     mapping(address => mapping(address => bool)) internal ownerToOperators;
 
     mapping(uint => uint) public ownership_change;
-
     /// @dev Get the approved address for a single NFT.
     /// @param _tokenId ID of the NFT to query the approval of.
     function getApproved(uint _tokenId) external view returns (address) {
@@ -319,6 +319,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         uint _tokenId,
         address _sender
     ) internal {
+        require(_to != address(0), "ZA");
         require(attachments[_tokenId] == 0 && !voted[_tokenId], "ATT");
         // Check requirements
         require(_isApprovedOrOwner(_sender, _tokenId), "NAO");
@@ -328,7 +329,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         // Remove NFT. Throws if `_tokenId` is not a valid NFT
         _removeTokenFrom(_from, _tokenId);
         // auto re-delegate
-        VotingDelegationLib.moveTokenDelegates(cpData, delegates(_from), delegates(_to), _tokenId, ownerOf);
+        votingDelegation.moveTokenDelegates(_from, _to, _tokenId);
         // Add NFT
         _addTokenTo(_to, _tokenId);
         // Set the block of ownership transfer (for Flash NFT protection)
@@ -487,7 +488,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         // Throws if `_to` is zero address
         assert(_to != address(0));
         // checkpoint for gov
-        VotingDelegationLib.moveTokenDelegates(cpData, address(0), delegates(_to), _tokenId, ownerOf);
+        votingDelegation.moveTokenDelegates(address(0), _to, _tokenId);
         // Add NFT. Throws if `_tokenId` is owned by someone
         _addTokenTo(_to, _tokenId);
         emit Transfer(address(0), _to, _tokenId);
@@ -548,7 +549,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         //_removeTokenFrom(msg.sender, _tokenId);
         _removeTokenFrom(owner, _tokenId);
         // checkpoint for gov
-        VotingDelegationLib.moveTokenDelegates(cpData, delegates(owner), address(0), _tokenId, ownerOf);
+        votingDelegation.moveTokenDelegates(owner, address(0), _tokenId);
 
         emit Transfer(owner, address(0), _tokenId);
     }
@@ -700,7 +701,6 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
             }
         }
 
-        epoch = _epoch;
         // Now point_history is filled until t=now
 
         if (_tokenId != 0) {
@@ -719,8 +719,20 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
             last_point.smNFTBonus = calculate_sm_nft_bonus(smNFTBalance);
         }
 
-        // Record the changed point into history
-        votingBalanceLogicData.point_history[_epoch] = last_point;
+        // If timestamp of last global point is the same, overwrite the last global point
+        // Else record the new global point into history
+        // Exclude epoch 0 (note: _epoch is always >= 1, see above)
+        // Two possible outcomes:
+        // timestamp != block.timestamp. Create new checkpoint.
+        // timestamp == block.timestamp. Overwrite last checkpoint.
+        if (_epoch != 1 && votingBalanceLogicData.point_history[_epoch - 1].ts == block.timestamp) {
+            // _epoch = epoch + 1, so we do not increment epoch
+            votingBalanceLogicData.point_history[_epoch - 1] = last_point;
+        } else {
+            // more than one global point may have been written, so we update epoch
+            epoch = _epoch;
+            votingBalanceLogicData.point_history[_epoch] = last_point;
+        }
 
         if (_tokenId != 0) {
             // Schedule the slope changes (slope is going down)
@@ -743,12 +755,15 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
                 // else: we recorded it already in old_dslope
             }
             // Now handle user history
-            uint user_epoch = votingBalanceLogicData.user_point_epoch[_tokenId] + 1;
-
-            votingBalanceLogicData.user_point_epoch[_tokenId] = user_epoch;
             u_new.ts = block.timestamp;
             u_new.blk = block.number;
-            votingBalanceLogicData.user_point_history[_tokenId][user_epoch] = u_new;
+            uint user_epoch = votingBalanceLogicData.user_point_epoch[_tokenId];
+            if (user_epoch != 0 && votingBalanceLogicData.user_point_history[_tokenId][user_epoch].ts == block.timestamp) {
+                votingBalanceLogicData.user_point_history[_tokenId][user_epoch] = u_new;
+            } else {
+                votingBalanceLogicData.user_point_epoch[_tokenId] = ++user_epoch;
+                votingBalanceLogicData.user_point_history[_tokenId][user_epoch] = u_new;
+            }
         }
     }
 
@@ -1146,8 +1161,9 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
 
     function split(
         uint _from,
-        uint _amount
+        int128 _amount
     ) external nonreentrant returns (uint256 _tokenId1, uint256 _tokenId2) {
+        require(_amount > 0, "ZV");
         address owner = idToOwner[_from];
         require(canSplit[msg.sender] || canSplit[address(0)], "!SPLIT");
         require(attachments[_from] == 0 && !voted[_from], "ATT");
@@ -1156,18 +1172,20 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         IVotingEscrow.LockedBalance memory newLocked = locked[_from];
         require(newLocked.end > block.timestamp || newLocked.isPermanent, "EXP");
         
-        int128 _splitAmount = newLocked.isSMNFT ? 
-            int128(int256(_amount + calculate_sm_nft_bonus(_amount))) : 
-            int128(int256(_amount));
-        
-        require(_splitAmount != 0, "ZV");
-        require(newLocked.amount > _splitAmount, "BIGVAL");
+        // Compute split amount safely
+        int128 _splitAmount = _amount;
+        if (newLocked.isSMNFT) {
+            int128 bonus = int128(int256(calculate_sm_nft_bonus(uint(int256(_amount)))));
+            _splitAmount += bonus;
+        }
+        require(_splitAmount > 0 && _splitAmount <= newLocked.amount, "ISA");
 
         locked[_from] = IVotingEscrow.LockedBalance(0, 0, false, false);
         _checkpoint(_from, newLocked, IVotingEscrow.LockedBalance(0, 0, false, false));
         _burn(_from);
 
-        newLocked.amount -= _splitAmount;
+
+        newLocked.amount = newLocked.amount - _splitAmount;
         _tokenId1 = _createSplitNFT(owner, newLocked);
 
         newLocked.amount = _splitAmount;
@@ -1202,7 +1220,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice The EIP-712 typehash for the contract's domain
-    bytes32 public constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
+    bytes32 public constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
     /// @notice The EIP-712 typehash for the delegation struct used by the contract
     bytes32 public constant DELEGATION_TYPEHASH = keccak256("Delegation(address delegatee,uint256 nonce,uint256 expiry)");
@@ -1214,9 +1232,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     mapping(address => uint) public nonces;
 
     /**
-     * @notice Overrides the standard `Comp.sol` delegates mapping to return
-     * the delegator's own address if they haven't delegated.
-     * This avoids having to delegate to oneself.
+     * @notice Returns the delegate of `delegator`, defaults to self if unset
      */
     function delegates(address delegator) public view returns (address) {
         address current = _delegates[delegator];
@@ -1229,11 +1245,10 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
      * @return The number of current votes for `account`
      */
     function getVotes(address account) external view returns (uint) {
-        uint32 nCheckpoints = cpData.numCheckpoints[account];
-        if (nCheckpoints == 0) {
+        uint[] memory _tokenIds = votingDelegation.getLatestTokenIds(account);
+        if (_tokenIds.length == 0) {
             return 0;
         }
-        uint[] storage _tokenIds = cpData.checkpoints[account][nCheckpoints - 1].tokenIds;
         uint votes = 0;
         for (uint i = 0; i < _tokenIds.length; i++) {
             uint tId = _tokenIds[i];
@@ -1247,9 +1262,15 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         view
         returns (uint)
     {
-        uint32 _checkIndex = VotingDelegationLib.getPastVotesIndex(cpData, account, timestamp);
+        uint32 _checkIndex = votingDelegation.getPastVotesIndex(account, timestamp);
+        
+        // If no checkpoints exist or timestamp is before first checkpoint, return 0
+        if (_checkIndex == type(uint32).max) {
+            return 0;
+        }
+        
         // Sum votes
-        uint[] storage _tokenIds = cpData.checkpoints[account][_checkIndex].tokenIds;
+        uint[] memory _tokenIds = votingDelegation.getTokenIdsAt(account, _checkIndex);
         uint votes = 0;
         for (uint i = 0; i < _tokenIds.length; i++) {
             uint tId = _tokenIds[i];
@@ -1265,13 +1286,24 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         view
         returns (uint)
     {
-        uint32 _checkIndex = VotingDelegationLib.getPastVotesIndex(cpData, account, timestamp);
+        uint32 _checkIndex = votingDelegation.getPastVotesIndex(account, timestamp);
+        
+        // If no checkpoints exist or timestamp is before first checkpoint, return 0
+        if (_checkIndex == type(uint32).max) {
+            return 0;
+        }
+        
         // Sum votes
-        uint[] storage _tokenIds = cpData.checkpoints[account][_checkIndex].tokenIds;
+        uint[] memory _tokenIds = votingDelegation.getTokenIdsAt(account, _checkIndex);
         uint votes = 0;
         for (uint i = 0; i < _tokenIds.length; i++) {
             uint tId = _tokenIds[i];
-            if(!locked[tId].isSMNFT) continue;
+            // Determine historical SMNFT status at the given timestamp using user checkpoints
+            uint userEpoch = votingBalanceLogicData.user_point_epoch[tId];
+            if (userEpoch == 0) continue;
+            uint idx = VotingBalanceLogic.getPastUserPointIndex(userEpoch, tId, timestamp, votingBalanceLogicData);
+            IVotingEscrow.Point memory up = votingBalanceLogicData.user_point_history[tId][idx];
+            if ((up.smNFT + up.smNFTBonus) == 0) continue;
             // Use the provided input timestamp here to get the right decay
             votes = votes + VotingBalanceLogic.balanceOfNFT(tId, timestamp, votingBalanceLogicData);
         }
@@ -1296,12 +1328,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         _delegates[delegator] = delegatee;
 
         emit DelegateChanged(delegator, currentDelegate, delegatee);
-        VotingDelegationLib.TokenHelpers memory tokenHelpers = VotingDelegationLib.TokenHelpers({
-            ownerOfFn: ownerOf,
-            ownerToNFTokenCountFn: ownerToNFTokenCountFn,
-            tokenOfOwnerByIndex:tokenOfOwnerByIndex
-        });
-        VotingDelegationLib._moveAllDelegates(cpData, delegator, currentDelegate, delegatee, tokenHelpers);
+        votingDelegation.moveAllDelegates(delegator, currentDelegate, delegatee);
     }
 
     /**
@@ -1310,9 +1337,15 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
      */
     function delegate(address delegatee) public {
         if (delegatee == address(0)) delegatee = msg.sender;
-        return _delegate(msg.sender, delegatee);
+        address delegator = msg.sender;
+        address currentDelegate = delegates(delegator);
+        _delegates[delegator] = delegatee;
+        votingDelegation.moveAllDelegates(delegator, currentDelegate, delegatee);
     }
 
+    /**
+     * @notice Delegate by EIP-712 signature
+     */
     function delegateBySig(
         address delegatee,
         uint nonce,
@@ -1340,25 +1373,13 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
             abi.encodePacked("\x19\x01", domainSeparator, structHash)
         );
         address signatory = ecrecover(digest, v, r, s);
-        require(
-            signatory != address(0),
-            "ZA"
-        );
-        require(
-            nonce == nonces[signatory]++,
-            "!NONCE"
-        );
-        require(
-            block.timestamp <= expiry,
-            "EXP"
-        );
-        return _delegate(signatory, delegatee);
-    }
-
-    function setSmNFTBonus(uint _bonus) external {
-        require(msg.sender == team);
-        require(_bonus <= PRECISISON);
-        SMNFT_BONUS = _bonus;
+        require(signatory != address(0), "ZA");
+        require(nonce == nonces[signatory]++, "!NONCE");
+        require(block.timestamp <= expiry, "EXP");
+        if (delegatee == address(0)) delegatee = signatory;
+        address currentDelegate = delegates(signatory);
+        _delegates[signatory] = delegatee;
+        votingDelegation.moveAllDelegates(signatory, currentDelegate, delegatee);
     }
 
     function calculate_sm_nft_bonus(uint amount) public view returns (uint){

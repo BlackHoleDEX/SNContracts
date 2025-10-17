@@ -6,7 +6,6 @@ import "./interfaces/IVoter.sol";
 import "./interfaces/IGaugeManager.sol";
 import "./interfaces/IVotingEscrow.sol";
 import "./interfaces/ITokenHandler.sol";
-import {IAutomatedVotingManager} from "./interfaces/IAutomatedVotingManager.sol";
 import {IAutoVotingEscrowManager} from "./AVM/interfaces/IAutoVotingEscrowManager.sol";
 import {IAutoVotingEscrow} from "./AVM/interfaces/IAutoVotingEscrow.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
@@ -24,12 +23,12 @@ contract Bribe is ReentrancyGuard {
 
     struct VotingRewardsPlot {
         uint128 balanceOf;
-        uint32 timestamp;
+        uint128 timestamp;
     }
 
     struct VotingSupplyPlot {
         uint128 supply;
-        uint32 timestamp;
+        uint128 timestamp;
     }
 
     mapping(address => mapping(uint256 => uint256)) public tokenRewardsPerEpoch;
@@ -41,6 +40,7 @@ contract Bribe is ReentrancyGuard {
     address public owner;
     address public avm; // does it need to be immutable?
     ITokenHandler public tokenHandler;
+    uint8 public constant MAX_EPOCHS = 20;
 
     string public TYPE;
 
@@ -97,33 +97,38 @@ contract Bribe is ReentrancyGuard {
         return bribeTokens.length;
     }
 
-    /// @notice Read earned amount given a tokenID and _rewardToken
+    /// @notice Read earned amount given a tokenID and _rewardToken (caps to 20 epochs)
     function earned(uint256 tokenId, address _rewardToken) public view returns(uint256){
+        (uint256 r, ) = _earnedUpToEpochs(tokenId, _rewardToken, MAX_EPOCHS);
+        return r;
+    }
+
+    /// @dev Calculates reward up to a maximum number of epochs and returns (reward, newLastTs)
+    function _earnedUpToEpochs(uint256 tokenId, address _rewardToken, uint256 maxEpochs) internal view returns (uint256 reward, uint256 newLastTs) {
         if (numVotingRewardsPlots[tokenId] == 0) {
-            return 0;
+            return (0, BlackTimeLibrary.epochStart(block.timestamp));
         }
-        
-        uint256 reward = 0;
-        uint256 _supply = 1;
-        uint256 _currTs = BlackTimeLibrary.epochStart(lastEarn[_rewardToken][tokenId]); // take epoch last claimed in as starting point
+
+        uint256 _currTs = BlackTimeLibrary.epochStart(lastEarn[_rewardToken][tokenId]); // starting epoch
         uint256 _index = getPriorVotingRewardsIndex(tokenId, _currTs);
         VotingRewardsPlot memory cp0 = votingRewardsPlots[tokenId][_index];
-        
-        
         _currTs = Math.max(_currTs, BlackTimeLibrary.epochStart(cp0.timestamp));
 
-        uint256 numEpochs = (BlackTimeLibrary.epochStart(block.timestamp) - _currTs) / WEEK;
+        uint256 latestEpochStart = BlackTimeLibrary.epochStart(block.timestamp);
+        uint256 numEpochs = (latestEpochStart - _currTs) / WEEK;
+        if (numEpochs == 0) {
+            return (0, _currTs);
+        }
+        uint256 limit = numEpochs < maxEpochs ? numEpochs : maxEpochs;
 
-        if (numEpochs > 0) {
-            for (uint256 i = 0; i < numEpochs; i++) {
-                _index = getPriorVotingRewardsIndex(tokenId, _currTs + WEEK - 1);
-                cp0 = votingRewardsPlots[tokenId][_index];
-                _supply = Math.max(votingSupplyPlots[getPriorVotingSupplyIndex(_currTs + WEEK - 1)].supply, 1);
-                reward += (cp0.balanceOf * tokenRewardsPerEpoch[_rewardToken][_currTs]) / _supply;
-                _currTs += WEEK;
-            }
-        } 
-        return reward;  
+        for (uint256 i = 0; i < limit; i++) {
+            _index = getPriorVotingRewardsIndex(tokenId, _currTs + WEEK - 1);
+            cp0 = votingRewardsPlots[tokenId][_index];
+            uint256 _supply = Math.max(votingSupplyPlots[getPriorVotingSupplyIndex(_currTs + WEEK - 1)].supply, 1);
+            reward += (cp0.balanceOf * tokenRewardsPerEpoch[_rewardToken][_currTs]) / _supply;
+            _currTs += WEEK; // move to next epoch start
+        }
+        newLastTs = _currTs; // set to next epoch start after processed epochs
     }
 
 
@@ -212,7 +217,7 @@ contract Bribe is ReentrancyGuard {
 
     function _writeVotingRewardsPlot(uint256 tokenId, uint256 balance) internal {
         uint256 nPlots = numVotingRewardsPlots[tokenId];
-        uint32 ts = uint32(block.timestamp);
+        uint128 ts = uint128(block.timestamp);
 
         if (
             nPlots > 0 &&
@@ -228,7 +233,7 @@ contract Bribe is ReentrancyGuard {
 
     function _writeVotingSupplyPlot() internal {
         uint256 nPlots = numVotingSupplyPlots;
-        uint32 ts = uint32(block.timestamp);
+        uint128 ts = uint128(block.timestamp);
 
         if (
             nPlots > 0 &&
@@ -260,27 +265,22 @@ contract Bribe is ReentrancyGuard {
     /// @notice Claim the TOKENID rewards
     function getReward(uint256 tokenId, address[] memory tokens) external nonReentrant  {
         address _owner = IVotingEscrow(ve).ownerOf(tokenId);
-        if(_isAValidAutoVotingEscrow(_owner)) {
-            _owner = IAutoVotingEscrowManager(avm).getOriginalOwner(tokenId);
+        if(IAutoVotingEscrowManager(avm).tokenIdToAVMId(tokenId) > 0) {
+            uint idx = IAutoVotingEscrowManager(avm).tokenIdToAVMId(tokenId)-1;
+            IAutoVotingEscrow[] memory avmList = IAutoVotingEscrowManager(avm).getAVMs();
+            _owner = address(avmList[idx]);
         }
         require(msg.sender == gaugeManager, "NA");
         uint256 _length = tokens.length;
         for (uint256 i = 0; i < _length; i++) {
-            uint256 _reward = earned(tokenId, tokens[i]);
-            lastEarn[tokens[i]][tokenId] = block.timestamp;
+            (uint256 _reward, uint256 _newLastTs) = _earnedUpToEpochs(tokenId, tokens[i], MAX_EPOCHS);
+            lastEarn[tokens[i]][tokenId] = _newLastTs;
             if (_reward > 0) {
                 IERC20(tokens[i]).safeTransfer(_owner, _reward);
             }
         }
     }
 
-    function _isAValidAutoVotingEscrow(address _addr) public view returns (bool) {
-        IAutoVotingEscrow[] memory avmList = IAutoVotingEscrowManager(avm).getAVMs();
-        for (uint i = 0; i < avmList.length; i++) {
-            if (address(avmList[i]) == _addr) return true;
-        }
-        return false;
-    }
     /// @dev Rewards are saved into Current EPOCH mapping. 
     function notifyRewardAmount(address _rewardsToken, uint256 reward) external nonReentrant {
         require(_isRewardToken(_rewardsToken), "!VERIFIED");
@@ -302,7 +302,7 @@ contract Bribe is ReentrancyGuard {
     function recoverERC20AndUpdateData(address tokenAddress, uint256 tokenAmount) external onlyAllowed {
         require(tokenAmount <= IERC20(tokenAddress).balanceOf(address(this)), "TOO_MUCH");
         
-        uint256 _startTimestamp = IMinter(minter).active_period();
+        uint256 _startTimestamp = BlackTimeLibrary.epochStart(block.timestamp);
         uint256 _lastReward = tokenRewardsPerEpoch[tokenAddress][_startTimestamp];
         tokenRewardsPerEpoch[tokenAddress][_startTimestamp] = _lastReward - tokenAmount;
         IERC20(tokenAddress).safeTransfer(owner, tokenAmount);

@@ -48,14 +48,22 @@ library VotingBalanceLogic {
     uint _t,
     Data storage votingBalanceLogicData
     ) internal view returns (uint256){
+        if (votingBalanceLogicData.user_point_history[_tokenId][1].ts > _t) {
+            return 0;
+        }
+        
+        // Handle edge case: if _t is after the last point, return the last index
+        if (votingBalanceLogicData.user_point_history[_tokenId][_epoch].ts <= _t) {
+            return _epoch;
+        }
+        
+        // Binary search for the largest index where userPoint.ts <= _t
         uint lower = 0;
         uint upper = _epoch;
         while (upper > lower) {
             uint center = upper - (upper - lower) / 2; // ceil, avoiding overflow
             IVotingEscrow.Point memory userPoint = votingBalanceLogicData.user_point_history[_tokenId][center];
-            if (userPoint.ts == _t) {
-                return center;
-            } else if (userPoint.ts < _t) {
+            if (userPoint.ts <= _t) {
                 lower = center;
             } else {
                 upper = center - 1;
@@ -214,14 +222,21 @@ library VotingBalanceLogic {
     function getPastGlobalPointIndex(uint _epoch,
         uint _t,
         Data storage VotingBalanceLogicData) internal view returns (uint256){
+        if (VotingBalanceLogicData.point_history[1].ts > _t) {
+            return 0;
+        }
+        
+        // Handle edge case: if _t is after the last point, return the last index
+        if (VotingBalanceLogicData.point_history[_epoch].ts <= _t) {
+            return _epoch;
+        }
+        
         uint lower = 0;
         uint upper = _epoch;
         while (upper > lower) {
             uint center = upper - (upper - lower) / 2; // ceil, avoiding overflow
             IVotingEscrow.Point memory point = VotingBalanceLogicData.point_history[center];
-            if (point.ts == _t) {
-                return center;
-            } else if (point.ts < _t) {
+            if (point.ts <= _t) {
                 lower = center;
             } else {
                 upper = center - 1;

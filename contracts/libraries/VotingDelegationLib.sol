@@ -1,78 +1,72 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 pragma solidity ^0.8.13;
 
+import {IVotingDelegation} from "../interfaces/IVotingDelegation.sol";
+import {IVotingEscrow} from "../interfaces/IVotingEscrow.sol";
 
-library VotingDelegationLib {
-    /// @notice A checkpoint for marking delegated tokenIds from a given timestamp
+contract VotingDelegationLib is IVotingDelegation {
     struct Checkpoint {
         uint timestamp;
         uint[] tokenIds;
     }
 
-    // A struct that holds all checkpoint data for different accounts.
-    // The calling contract will include one instance of this struct in storage.
-    struct Data {
-        // For each account, store a mapping from checkpoint index to Checkpoint.
-        mapping(address => mapping(uint32 => Checkpoint)) checkpoints;
-        // For each account, store the number of checkpoints.
-        mapping(address => uint32) numCheckpoints;
+    // storage of checkpoints per account
+    mapping(address => mapping(uint32 => Checkpoint)) internal checkpoints;
+    mapping(address => uint32) internal numCheckpoints;
+
+    uint public constant MAX_DELEGATES = 1024;
+
+    IVotingEscrow public votingEscrow;
+
+    address public team;
+
+    constructor() {
+        team = msg.sender;
     }
 
-    struct TokenHelpers {
-        function(uint) view returns (address) ownerOfFn;
-        function(address) view returns (uint) ownerToNFTokenCountFn;
-        function(address, uint) view returns (uint) tokenOfOwnerByIndex;
+    function setTeam(address _team) external {
+        require(msg.sender == team);
+        team = _team;
     }
+    
+    function setVotingEscrow(address votingEscrow_) external {
+        require(msg.sender == team);
+        require(votingEscrow_ != address(0), "ZA");
+        require(address(votingEscrow) == address(0), "Already set"); // only set once
+        votingEscrow = IVotingEscrow(votingEscrow_);
+    }
+    
 
-    uint public constant MAX_DELEGATES = 1024; // avoid too much gas
-    /**
-     * @notice Returns the checkpoint index to write for an account.
-     * If the most recent checkpoint was created in the current timestamp, returns that index.
-     * Otherwise, returns the current number of checkpoints (i.e. a new checkpoint index).
-     */
-    function findCheckpointToWrite(
-        Data storage self,
-        address account,
-        uint256 currentTimestamp
-    ) internal view returns (uint32) {
-        uint32 n = self.numCheckpoints[account];
-        if (n > 0 && self.checkpoints[account][n - 1].timestamp == currentTimestamp) {
+    function findCheckpointToWrite(address account, uint256 currentTimestamp) internal view returns (uint32) {
+        uint32 n = numCheckpoints[account];
+        if (n > 0 && checkpoints[account][n - 1].timestamp == currentTimestamp) {
             return n - 1;
         } else {
             return n;
         }
     }
 
-    function moveTokenDelegates(
-        Data storage self,
-        address srcRep,
-        address dstRep,
-        uint _tokenId,
-        function(uint) view returns (address) ownerOfFn
-    ) internal {
+    function moveTokenDelegates(address srcRep, address dstRep, uint _tokenId) external override {
         if (srcRep != dstRep && _tokenId > 0) {
             if (srcRep != address(0)) {
-                uint32 srcRepNum = self.numCheckpoints[srcRep];
-                uint[] storage srcRepOld = srcRepNum > 0
-                    ? self.checkpoints[srcRep][srcRepNum - 1].tokenIds
-                    : self.checkpoints[srcRep][0].tokenIds;
-                uint32 nextSrcRepNum = findCheckpointToWrite(self, srcRep, block.timestamp);
+                uint32 srcRepNum = numCheckpoints[srcRep];
+                uint[] storage srcRepOld = srcRepNum > 0 ? checkpoints[srcRep][srcRepNum - 1].tokenIds : checkpoints[srcRep][0].tokenIds;
+                uint32 nextSrcRepNum = findCheckpointToWrite(srcRep, block.timestamp);
                 bool _isCheckpointInNewBlock = (srcRepNum > 0) ? (nextSrcRepNum != srcRepNum - 1) : true;
-                Checkpoint storage cpSrcRep = self.checkpoints[srcRep][nextSrcRepNum];
+                Checkpoint storage cpSrcRep = checkpoints[srcRep][nextSrcRepNum];
                 uint[] storage srcRepNew = cpSrcRep.tokenIds;
                 cpSrcRep.timestamp = block.timestamp;
-                // All the same except _tokenId
                 uint256 length = srcRepOld.length;
                 for (uint i = 0; i < length;) {
                     uint tId = srcRepOld[i];
-                    if(_isCheckpointInNewBlock) {
-                        if(ownerOfFn(tId) == srcRep) {
+                    if (_isCheckpointInNewBlock) {
+                        if (votingEscrow.ownerOf(tId) == srcRep) {
                             srcRepNew.push(tId);
                         }
                         i++;
                     } else {
-                        if(ownerOfFn(tId) != srcRep) {
-                            srcRepNew[i] = srcRepNew[length -1];
+                        if (votingEscrow.ownerOf(tId) != srcRep) {
+                            srcRepNew[i] = srcRepNew[length - 1];
                             srcRepNew.pop();
                             length--;
                         } else {
@@ -80,72 +74,55 @@ library VotingDelegationLib {
                         }
                     }
                 }
-                self.numCheckpoints[srcRep] = nextSrcRepNum + 1;   
+                numCheckpoints[srcRep] = nextSrcRepNum + 1;
             }
 
             if (dstRep != address(0)) {
-                uint32 dstRepNum = self.numCheckpoints[dstRep];
-                uint[] storage dstRepOld = dstRepNum > 0
-                    ? self.checkpoints[dstRep][dstRepNum - 1].tokenIds
-                    : self.checkpoints[dstRep][0].tokenIds;
-                uint32 nextDstRepNum = findCheckpointToWrite(self, dstRep, block.timestamp);
+                uint32 dstRepNum = numCheckpoints[dstRep];
+                uint[] storage dstRepOld = dstRepNum > 0 ? checkpoints[dstRep][dstRepNum - 1].tokenIds : checkpoints[dstRep][0].tokenIds;
+                uint32 nextDstRepNum = findCheckpointToWrite(dstRep, block.timestamp);
                 bool _isCheckpointInNewBlock = (dstRepNum > 0) ? (nextDstRepNum != dstRepNum - 1) : true;
-                Checkpoint storage cpDstRep = self.checkpoints[dstRep][nextDstRepNum];
+                Checkpoint storage cpDstRep = checkpoints[dstRep][nextDstRepNum];
                 uint[] storage dstRepNew = cpDstRep.tokenIds;
                 cpDstRep.timestamp = block.timestamp;
-                require(
-                    dstRepOld.length + 1 <= MAX_DELEGATES,
-                    "tokens>1"
-                );
-                if(_isCheckpointInNewBlock) {
+                require(dstRepOld.length + 1 <= MAX_DELEGATES, "tokens>1");
+                if (_isCheckpointInNewBlock) {
                     for (uint i = 0; i < dstRepOld.length; i++) {
                         uint tId = dstRepOld[i];
                         dstRepNew.push(tId);
                     }
                 }
                 dstRepNew.push(_tokenId);
-                self.numCheckpoints[dstRep] = nextDstRepNum + 1;
+                numCheckpoints[dstRep] = nextDstRepNum + 1;
             }
         }
     }
 
-    function _moveAllDelegates(
-        Data storage self,
-        address owner,
-        address srcRep,
-        address dstRep,
-        TokenHelpers memory tokenHelpers
-    ) internal {
-        // You can only redelegate what you own
+    function moveAllDelegates(address owner, address srcRep, address dstRep) external override {
         address _owner = owner;
-        Data storage _self = self;
         address _srcRep = srcRep;
         address _dstRep = dstRep;
-        TokenHelpers memory _tokenHelper = tokenHelpers;
         if (_srcRep != _dstRep) {
             if (_srcRep != address(0)) {
-                uint32 srcRepNum = _self.numCheckpoints[_srcRep];
-                uint[] storage srcRepOld = srcRepNum > 0
-                    ? _self.checkpoints[_srcRep][srcRepNum - 1].tokenIds
-                    : _self.checkpoints[_srcRep][0].tokenIds;
-                uint32 nextSrcRepNum = findCheckpointToWrite(_self,_srcRep, block.timestamp);
+                uint32 srcRepNum = numCheckpoints[_srcRep];
+                uint[] storage srcRepOld = srcRepNum > 0 ? checkpoints[_srcRep][srcRepNum - 1].tokenIds : checkpoints[_srcRep][0].tokenIds;
+                uint32 nextSrcRepNum = findCheckpointToWrite(_srcRep, block.timestamp);
                 bool _isCheckpointInNewBlock = (srcRepNum > 0) ? (nextSrcRepNum != srcRepNum - 1) : true;
-                // if(_isCheckpointInNewBlock) {
-                Checkpoint storage cpSrcRep = _self.checkpoints[_srcRep][nextSrcRepNum];
+                Checkpoint storage cpSrcRep = checkpoints[_srcRep][nextSrcRepNum];
                 uint[] storage srcRepNew = cpSrcRep.tokenIds;
                 cpSrcRep.timestamp = block.timestamp;
 
                 uint256 length = srcRepOld.length;
                 for (uint i = 0; i < length;) {
                     uint tId = srcRepOld[i];
-                    if(_isCheckpointInNewBlock) {
-                        if(_tokenHelper.ownerOfFn(tId) != _owner) {
+                    if (_isCheckpointInNewBlock) {
+                        if (votingEscrow.ownerOf(tId) != _owner) {
                             srcRepNew.push(tId);
                         }
                         i++;
                     } else {
-                        if(_tokenHelper.ownerOfFn(tId) == _owner) {
-                            srcRepNew[i] = srcRepNew[length -1];
+                        if (votingEscrow.ownerOf(tId) == _owner) {
+                            srcRepNew[i] = srcRepNew[length - 1];
                             srcRepNew.pop();
                             length--;
                         } else {
@@ -153,61 +130,50 @@ library VotingDelegationLib {
                         }
                     }
                 }
-                _self.numCheckpoints[_srcRep] = nextSrcRepNum + 1;
+                numCheckpoints[_srcRep] = nextSrcRepNum + 1;
             }
 
-
             if (_dstRep != address(0)) {
-                uint32 dstRepNum = _self.numCheckpoints[_dstRep];
-                uint[] storage dstRepOld = dstRepNum > 0
-                    ? _self.checkpoints[_dstRep][dstRepNum - 1].tokenIds
-                    : _self.checkpoints[_dstRep][0].tokenIds;
-                uint32 nextDstRepNum = findCheckpointToWrite(_self,_dstRep, block.timestamp);
+                uint32 dstRepNum = numCheckpoints[_dstRep];
+                uint[] storage dstRepOld = dstRepNum > 0 ? checkpoints[_dstRep][dstRepNum - 1].tokenIds : checkpoints[_dstRep][0].tokenIds;
+                uint32 nextDstRepNum = findCheckpointToWrite(_dstRep, block.timestamp);
                 bool _isCheckpointInNewBlock = (dstRepNum > 0) ? (nextDstRepNum != dstRepNum - 1) : true;
-                Checkpoint storage cpDstRep = _self.checkpoints[_dstRep][nextDstRepNum];
+                Checkpoint storage cpDstRep = checkpoints[_dstRep][nextDstRepNum];
                 uint[] storage dstRepNew = cpDstRep.tokenIds;
                 cpDstRep.timestamp = block.timestamp;
-                uint ownerTokenCount = _tokenHelper.ownerToNFTokenCountFn(_owner);
-                require(
-                    dstRepOld.length + ownerTokenCount <= MAX_DELEGATES,
-                    "tokens>1"
-                );
-                if(_isCheckpointInNewBlock) {
+                uint ownerTokenCount = votingEscrow.ownerToNFTokenCountFn(_owner);
+                require(dstRepOld.length + ownerTokenCount <= MAX_DELEGATES, "tokens>1");
+                if (_isCheckpointInNewBlock) {
                     for (uint i = 0; i < dstRepOld.length; i++) {
                         uint tId = dstRepOld[i];
                         dstRepNew.push(tId);
                     }
                 }
-                // Plus all that's owned
                 for (uint i = 0; i < ownerTokenCount; i++) {
-                    uint tId = _tokenHelper.tokenOfOwnerByIndex(_owner,i);
+                    uint tId = votingEscrow.tokenOfOwnerByIndex(_owner, i);
                     dstRepNew.push(tId);
                 }
-                _self.numCheckpoints[_dstRep] = nextDstRepNum + 1;   
+                numCheckpoints[_dstRep] = nextDstRepNum + 1;
             }
         }
     }
 
-    function getPastVotesIndex(Data storage data, address account, uint timestamp) internal view returns (uint32) {
-        uint32 nCheckpoints = data.numCheckpoints[account];
+    function getPastVotesIndex(address account, uint timestamp) external view override returns (uint32) {
+        uint32 nCheckpoints = numCheckpoints[account];
         if (nCheckpoints == 0) {
-            return 0;
+            return type(uint32).max;
         }
-        // First check most recent balance
-        if (data.checkpoints[account][nCheckpoints - 1].timestamp <= timestamp) {
+        if (checkpoints[account][0].timestamp > timestamp) {
+            return type(uint32).max;
+        }
+        if (checkpoints[account][nCheckpoints - 1].timestamp <= timestamp) {
             return (nCheckpoints - 1);
         }
-
-        // Next check implicit zero balance
-        if (data.checkpoints[account][0].timestamp > timestamp) {
-            return 0;
-        }
-
         uint32 lower = 0;
         uint32 upper = nCheckpoints - 1;
         while (upper > lower) {
-            uint32 center = upper - (upper - lower) / 2; // ceil, avoiding overflow
-            VotingDelegationLib.Checkpoint storage cp = data.checkpoints[account][center];
+            uint32 center = upper - (upper - lower) / 2;
+            Checkpoint storage cp = checkpoints[account][center];
             if (cp.timestamp == timestamp) {
                 return center;
             } else if (cp.timestamp < timestamp) {
@@ -219,4 +185,13 @@ library VotingDelegationLib {
         return lower;
     }
 
+    function getLatestTokenIds(address account) external view override returns (uint[] memory) {
+        uint32 n = numCheckpoints[account];
+        if (n == 0) return new uint[](0);
+        return checkpoints[account][n - 1].tokenIds;
+    }
+
+    function getTokenIdsAt(address account, uint32 index) external view override returns (uint[] memory) {
+        return checkpoints[account][index].tokenIds;
+    }
 }

@@ -9,12 +9,14 @@ import '../interfaces/IPair.sol';
 import '../interfaces/IPairFactory.sol';
 import '../interfaces/IVoter.sol';
 import '../interfaces/IGaugeManager.sol';
-import "../AVM/interfaces/IAutoVotingEscrowManager.sol";
 import '../interfaces/IVotingEscrow.sol';
 import '../interfaces/IRewardsDistributor.sol';
 import '../interfaces/IGaugeFactory.sol';
+import '../interfaces/IGaugeFactoryCL.sol';
+
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "../AVM/interfaces/IAutoVotingEscrowManager.sol";
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 
 import "hardhat/console.sol";
@@ -36,6 +38,11 @@ interface IPairAPI {
 }
 
 contract veNFTAPI is Initializable {
+
+    struct LockInfo {
+        address owner;
+        uint256 tokenId;
+    }
 
     struct pairVotes {
         address pair;
@@ -59,7 +66,7 @@ contract veNFTAPI is Initializable {
 
     struct veNFT {
         uint8 decimals;
-        
+
         bool voted;
         bool hasVotedForEpoch;
         uint256 attachments;
@@ -70,10 +77,10 @@ contract veNFTAPI is Initializable {
         uint256 rebase_amount;
         uint256 lockEnd;
         uint256 vote_ts;
-        pairVotes[] votes;        
-        
+        pairVotes[] votes;
+
         address account;
-        
+
         bool isSMNFT;
         bool isPermanent;
 
@@ -83,11 +90,11 @@ contract veNFTAPI is Initializable {
     }
 
     struct Reward {
-        
+
         uint256 id;
-        uint256 amount;  
+        uint256 amount;
         uint8 decimals;
-        
+
         address pair;
         address token;
         address bribe;
@@ -105,27 +112,27 @@ contract veNFTAPI is Initializable {
         uint128 lockedAmount;
         PairReward[] pairRewards;
     }
-   
+
     uint256 constant public MAX_RESULTS = 1000;
     uint256 constant public MAX_PAIRS = 30;
-    uint256 public WEEK; 
+    uint256 public WEEK;
 
     IVoter public voter;
     IGaugeManager public gaugeManager;
     IGaugeFactory public gaugeFactory;
+    IGaugeFactoryCL public gaugeFactoryCL;
     address public underlyingToken;
-    
+
 
     IVotingEscrow public ve;
     IRewardsDistributor public rewardDisitributor;
 
     address public pairAPI;
     IPairFactory public pairFactory;
-    
+
 
     address public owner;
     IAutoVotingEscrowManager public avm;
-
     event Owner(address oldOwner, address newOwner);
 
     struct AllPairRewards {
@@ -133,10 +140,19 @@ contract veNFTAPI is Initializable {
     }
     constructor() {}
 
-    function initialize(address _votingEscrow, address _gaugeManager) initializer public {
+    function initialize(address _voter, address _rewarddistro, address _gaugeFactory, address _gaugeFactoryCL, address _gaugeManager) initializer public {
         owner = msg.sender;
-        ve = IVotingEscrow( _votingEscrow );
+        voter = IVoter(_voter);
+        rewardDisitributor = IRewardsDistributor(_rewarddistro);
+        gaugeFactory = IGaugeFactory(_gaugeFactory);
         gaugeManager = IGaugeManager(_gaugeManager);
+        gaugeFactoryCL = IGaugeFactoryCL(_gaugeFactoryCL);
+
+        require(rewardDisitributor.voting_escrow() == voter._ve(), 've!=ve');
+
+        ve = IVotingEscrow( rewardDisitributor.voting_escrow() );
+        underlyingToken = IVotingEscrow(ve).token();
+
         WEEK = BlackTimeLibrary.WEEK;
     }
 
@@ -179,7 +195,7 @@ contract veNFTAPI is Initializable {
         return venft;
     }
 
-        function getAVMNFTFromAddress(address _user) public view returns (veNFT[] memory) {
+    function getAVMNFTFromAddress(address _user) public view returns (veNFT[] memory) {
         IAutoVotingEscrow[] memory avms = avm.getAVMs(); // assuming avms() is a function
         veNFT[] memory temp = new veNFT[](1000) ; // ✅ DECLARATION — fixed-size temporary memory array
         uint count = 0;
@@ -210,8 +226,8 @@ contract veNFTAPI is Initializable {
             return venft;
         }
 
-        // uint _totalPoolVotes = voter.poolVoteLength(id);
-        // pairVotes[] memory votes = new pairVotes[](_totalPoolVotes);
+        uint _totalPoolVotes = voter.poolVoteLength(id);
+        pairVotes[] memory votes = new pairVotes[](_totalPoolVotes);
 
         IVotingEscrow.LockedBalance memory _lockedBalance;
         _lockedBalance = ve.locked(id);
@@ -220,44 +236,44 @@ contract veNFTAPI is Initializable {
         uint256 _poolWeight;
         address _votedPair;
 
-        // for(k = 0; k < _totalPoolVotes; k++){
+        for(k = 0; k < _totalPoolVotes; k++){
 
-        //     _votedPair = voter.poolVote(id, k);
-        //     if(_votedPair == address(0)){
-        //         break;
-        //     }
-        //     _poolWeight = voter.votes(id, _votedPair);
-        //     votes[k].pair = _votedPair;
-        //     votes[k].weight = _poolWeight;
-        // }
+            _votedPair = voter.poolVote(id, k);
+            if(_votedPair == address(0)){
+                break;
+            }
+            _poolWeight = voter.votes(id, _votedPair);
+            votes[k].pair = _votedPair;
+            votes[k].weight = _poolWeight;
+        }
 
         venft.id = id;
         venft.account = _owner;
         venft.decimals = ve.decimals();
         venft.amount = _lockedBalance.isSMNFT ? uint128(ve.calculate_original_sm_nft_amount(uint256(int256(_lockedBalance.amount)))) : uint128(_lockedBalance.amount); // this is 10% extra for super massive
         venft.voting_amount = ve.balanceOfNFT(id);
-        // venft.rebase_amount = rewardDisitributor.claimable(id);
+        venft.rebase_amount = rewardDisitributor.claimable(id);
         venft.lockEnd = _lockedBalance.end;
-        // venft.vote_ts = voter.lastVotedTimestamp(id);
-        // venft.votes = votes;
+        venft.vote_ts = voter.lastVotedTimestamp(id);
+        venft.votes = votes;
         venft.token = ve.token();
         venft.tokenSymbol =  IERC20( ve.token() ).symbol();
         venft.tokenDecimals = IERC20( ve.token() ).decimals();
         venft.attachments = ve.attachments(id);
         venft.isSMNFT = _lockedBalance.isSMNFT;
         venft.isPermanent = _lockedBalance.isPermanent;
-        
+
         venft.voted = ve.voted(id);
-        // venft.hasVotedForEpoch = (voter.epochTimestamp() < venft.vote_ts) && (venft.vote_ts < voter.epochTimestamp() + WEEK);
+        venft.hasVotedForEpoch = (BlackTimeLibrary.epochStart(block.timestamp) < venft.vote_ts) && (venft.vote_ts < BlackTimeLibrary.epochNext(block.timestamp));
     }
 
-    // used only for sAMM and vAMM    
+    // used only for sAMM and vAMM
     // function allPairRewards(uint256 _amount, uint256 _offset, uint256 id) external view returns(AllPairRewards[] memory rewards){
-        
+
     //     rewards = new AllPairRewards[](MAX_PAIRS);
 
     //     uint256 totalPairs = pairFactory.allPairsLength();
-        
+
     //     uint i = _offset;
     //     address _pair;
     //     address _gaugeAddress;
@@ -272,43 +288,64 @@ contract veNFTAPI is Initializable {
     // }
 
     function getAllPairRewards(address _user, uint _amounts, uint _offset) external view returns(uint totNFTs, bool hasNext, LockReward[] memory _lockReward){
-        
+
         if(_user == address(0)){
 
             return (totNFTs, hasNext, _lockReward);
         }
+        veNFT[] memory avmNFTsOfUser = getAVMNFTFromAddress(_user);
 
         totNFTs = ve.balanceOf(_user);
 
-        uint length = _amounts < totNFTs ? _amounts : totNFTs;
+        uint length = _amounts < (totNFTs + avmNFTsOfUser.length) ? _amounts : (totNFTs + avmNFTsOfUser.length);
         _lockReward = new LockReward[](length);
+
+
+        // int length = avmNFTsOfUser.length;
 
         uint i = _offset;
         uint256 nftId;
         hasNext = true;
 
-        for(i; i < _offset + length; i++){
-            if(i >= totNFTs) {
+        for(i; i < _offset + _amounts; i++){ // need to be amounts right
+            if(i >= (totNFTs + avmNFTsOfUser.length)) {
                 hasNext = false;
                 break;
             }
-            
-            nftId = ve.tokenOfOwnerByIndex(_user, i);
+            if(i < totNFTs) {
+                nftId = ve.tokenOfOwnerByIndex(_user, i);
+            } else {
+                uint avmIndex = i - totNFTs;
+                nftId = avmNFTsOfUser[avmIndex].id;
+            }
 
             _lockReward[i-_offset].id = nftId;
             _lockReward[i-_offset].lockedAmount = uint128(ve.locked(nftId).amount);
             _lockReward[i-_offset].pairRewards = _getRewardsForNft(nftId);
         }
-    }  
+
+        totNFTs += avmNFTsOfUser.length;
+    }
 
     function _getRewardsForNft(uint nftId) internal view returns (PairReward[] memory pairReward) {
-        uint gaugesLength = gaugeFactory.length();
+        uint basicPoolGaugeLength = gaugeFactory.length();
+        uint clPoolGaugeLength = gaugeFactoryCL.length();
         uint maxPairRewardCount = 0;
-        PairReward[] memory _pairRewards = new PairReward[](gaugesLength);
+        PairReward[] memory _pairRewards = new PairReward[](basicPoolGaugeLength + clPoolGaugeLength);
+        Reward[] memory _rewardData;
+        bool hasReward;
+        address poolAddress;
 
-        for(uint i=0; i<gaugesLength; i++){
-            address poolAddress = IGaugeManager(gaugeManager).poolForGauge(gaugeFactory.gauges(i));
-            (Reward[] memory _rewardData, bool hasReward) = _pairReward(poolAddress, nftId, gaugeFactory.gauges(i));
+        for(uint i=0; i<basicPoolGaugeLength + clPoolGaugeLength; i++){
+            if(i >= basicPoolGaugeLength){
+                poolAddress = IGaugeManager(gaugeManager).poolForGauge(gaugeFactoryCL.gauges(i-basicPoolGaugeLength));
+                (_rewardData, hasReward) = _pairReward(poolAddress, nftId, gaugeFactoryCL.gauges(i-basicPoolGaugeLength));
+            }
+            else{
+                poolAddress = IGaugeManager(gaugeManager).poolForGauge(gaugeFactory.gauges(i));
+                (_rewardData, hasReward) = _pairReward(poolAddress, nftId, gaugeFactory.gauges(i));
+            }
+
             if(hasReward)
             {
                 _pairRewards[maxPairRewardCount].pair = poolAddress;
@@ -404,7 +441,7 @@ contract veNFTAPI is Initializable {
             bribe: bribe
         });
     }
-    
+
 
     function setOwner(address _owner) external {
         require(msg.sender == owner, 'NA');
@@ -413,7 +450,7 @@ contract veNFTAPI is Initializable {
         emit Owner(msg.sender, _owner);
     }
 
-    
+
     function setVoter(address _voter) external  {
         require(msg.sender == owner);
 
@@ -427,37 +464,41 @@ contract veNFTAPI is Initializable {
 
     function setGaugeManager(address _gaugeManager) external  {
         require(msg.sender == owner);
-
         gaugeManager = IGaugeManager(_gaugeManager);
     }
 
     function setGaugeFactory(address _gaugeFactory) external  {
         require(msg.sender == owner);
-
         gaugeFactory = IGaugeFactory(_gaugeFactory);
+    }
+
+    function setGaugeFactoryCL(address _gaugeFactoryCL) external  {
+        require(msg.sender == owner);
+        gaugeFactoryCL = IGaugeFactoryCL(_gaugeFactoryCL);
     }
 
 
     function setRewardDistro(address _rewarddistro) external {
         require(msg.sender == owner);
-        
+
         rewardDisitributor = IRewardsDistributor(_rewarddistro);
         require(rewardDisitributor.voting_escrow() == voter._ve(), 've!=ve');
 
         ve = IVotingEscrow( rewardDisitributor.voting_escrow() );
         underlyingToken = IVotingEscrow(ve).token();
     }
-    
+
     function setPairAPI(address _pairApi) external {
         require(msg.sender == owner);
-        
+
         pairAPI = _pairApi;
     }
 
 
     function setPairFactory(address _pairFactory) external {
-        require(msg.sender == owner);  
+        require(msg.sender == owner);
         pairFactory = IPairFactory(_pairFactory);
     }
 
 }
+

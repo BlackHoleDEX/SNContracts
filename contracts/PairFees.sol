@@ -10,9 +10,6 @@ contract PairFees {
     address internal immutable token0; // token0 of pair, saved localy and statically for gas optimization
     address internal immutable token1; // Token1 of pair, saved localy and statically for gas optimization
 
-    uint256 public toStake0;
-    uint256 public toStake1;
-
     constructor(address _token0, address _token1) {
         pair = msg.sender;
         token0 = _token0;
@@ -31,33 +28,4 @@ contract PairFees {
         if (amount0 > 0) _safeTransfer(token0, recipient, amount0);
         if (amount1 > 0) _safeTransfer(token1, recipient, amount1);
     }
-
-   
-
-    function processStakingFees(uint amount, bool isTokenZero) external {
-        require(msg.sender == pair);
-        if(amount > 0 && isTokenZero){
-            toStake0 += amount;
-        }
-    
-        if(amount > 0 && !isTokenZero){
-            toStake1 += amount;
-        }
-
-    }
-
-    function withdrawStakingFees(address recipient) external {
-        require(msg.sender == pair);
-        if (toStake0 > 0){
-            _safeTransfer(token0, recipient, toStake0);
-            toStake0 = 0;
-        } 
-        if (toStake1 > 0){
-            _safeTransfer(token1, recipient, toStake1);
-            toStake1 = 0;
-        }
-    }
-
-      
-
 }

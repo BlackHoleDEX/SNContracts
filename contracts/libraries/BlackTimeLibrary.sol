@@ -6,8 +6,6 @@ library BlackTimeLibrary {
     uint256 internal constant WEEK = 7 * 86400;
     uint internal constant NO_VOTING_WINDOW = 3600;
     uint256 internal constant MAX_LOCK_DURATION = 86400 * 365 * 4;
-    uint256 internal constant GENESIS_STAKING_MATURITY_TIME = 180 * 86400;
-    uint256 internal constant NO_GENESIS_DEPOSIT_WINDOW = 3 * 3600;
 
     /// @dev Returns start of epoch based on current timestamp
     function epochStart(uint256 timestamp) internal pure returns (uint256) {
@@ -40,8 +38,8 @@ library BlackTimeLibrary {
     /// @dev Returns the status if it is the last hour of the epoch
     function isLastHour(uint256 timestamp) internal pure returns (bool) {
         // return block.timestamp % 7 days >= 6 days + 23 hours;
-        return timestamp >= BlackTimeLibrary.epochVoteEnd(timestamp)
-            && timestamp < BlackTimeLibrary.epochNext(timestamp);
+        return timestamp >= BlackTimeLibrary.epochVoteEnd(timestamp) 
+        && timestamp < BlackTimeLibrary.epochNext(timestamp);
     }
 
     /// @dev Returns duration in multiples of epoch
@@ -58,17 +56,4 @@ library BlackTimeLibrary {
         }
     }
 
-    /// @dev Returns duration in multiples of epoch
-    function prevPreEpoch(uint256 timestamp) internal pure returns (uint256) {
-        unchecked {
-            return  epochStart(timestamp) - NO_GENESIS_DEPOSIT_WINDOW;
-        }
-    }
-
-    /// @dev Returns duration in multiples of epoch
-    function currPreEpoch(uint256 timestamp) internal pure returns (uint256) {
-        unchecked {
-            return  epochNext(timestamp) - NO_GENESIS_DEPOSIT_WINDOW;
-        }
-    }
 }

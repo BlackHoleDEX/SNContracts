@@ -7,7 +7,6 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import '../interfaces/IPermissionsRegistry.sol';
 
 interface IBribe {
-    function addReward(address) external;
     function setVoter(address _Voter) external;
     function setMinter(address _Voter) external;
     function setOwner(address _Voter) external;
@@ -21,8 +20,6 @@ contract BribeFactoryV3 is OwnableUpgradeable {
     address[] internal _bribes;
     address public voter;
     address public gaugeManager;
-
-    address[] public defaultRewardToken;
 
     IPermissionsRegistry public permissionsRegistry;
     address public tokenHandler;
@@ -38,15 +35,6 @@ contract BribeFactoryV3 is OwnableUpgradeable {
         __Ownable_init();   //after deploy ownership to multisig
         voter = _voter;
         gaugeManager = _gaugeManager;
-        //bribe default tokens
-        // defaultRewardToken.push(address(0xF4C8E32EaDEC4BFe97E0F595AdD0f4450a863a11));   // $the
-        // defaultRewardToken.push(address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c));   // $wbnb
-        // defaultRewardToken.push(address(0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d));   // $usdc
-        // defaultRewardToken.push(address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56));   // $busd
-        // defaultRewardToken.push(address(0x55d398326f99059fF775485246999027B3197955));   // $usdt
-
-        defaultRewardToken.push(address(0x68b8220c62513493777563943037Ea919ba0b24C)); // BLACK address
-
         // registry to check accesses
         permissionsRegistry = IPermissionsRegistry(_permissionsRegistry);
         tokenHandler = _tokenHandler;
@@ -97,28 +85,6 @@ contract BribeFactoryV3 is OwnableUpgradeable {
         tokenHandler = _tokenHandler;
     }
 
-    /// @notice set the bribe factory permission registry
-    function pushDefaultRewardToken(address _token) external {
-        require(owner() == msg.sender, 'NA');
-        require(_token != address(0), 'ZA');
-        defaultRewardToken.push(_token);
-    }
-
-
-    /// @notice set the bribe factory permission registry
-    function removeDefaultRewardToken(address _token) external {
-        require(owner() == msg.sender, 'NA');
-        require(_token != address(0), 'ZA');
-        uint i = 0;
-        for(i; i < defaultRewardToken.length; i++){
-            if(defaultRewardToken[i] == _token){
-                defaultRewardToken[i] = defaultRewardToken[defaultRewardToken.length -1];
-                defaultRewardToken.pop();
-                break;
-            }
-        }
-    }
-
     /* -----------------------------------------------------------------------------
     --------------------------------------------------------------------------------
     --------------------------------------------------------------------------------
@@ -126,41 +92,6 @@ contract BribeFactoryV3 is OwnableUpgradeable {
     --------------------------------------------------------------------------------
     --------------------------------------------------------------------------------
     ----------------------------------------------------------------------------- */
-
-    /// @notice Add a reward token to a given bribe
-    function addRewardToBribe(address _token, address __bribe) external onlyAllowed {
-        IBribe(__bribe).addReward(_token);
-    }
-
-    /// @notice Add multiple reward token to a given bribe
-    function addRewardsToBribe(address[] memory _token, address __bribe) external onlyAllowed {
-        uint i = 0;
-        for ( i ; i < _token.length; i++){
-            IBribe(__bribe).addReward(_token[i]);
-        }
-    }
-
-    /// @notice Add a reward token to given bribes
-    function addRewardToBribes(address _token, address[] memory __bribes) external onlyAllowed {
-        uint i = 0;
-        for ( i ; i < __bribes.length; i++){
-            IBribe(__bribes[i]).addReward(_token);
-        }
-
-    }
-
-    /// @notice Add multiple reward tokens to given bribes
-    function addRewardsToBribes(address[][] memory _token, address[] memory __bribes) external onlyAllowed {
-        uint i = 0;
-        uint k;
-        for ( i ; i < __bribes.length; i++){
-            address _br = __bribes[i];
-            for(k = 0; k < _token.length; k++){
-                IBribe(_br).addReward(_token[i][k]);
-            }
-        }
-
-    }
 
     /// @notice set a new voter in given bribes
     function setBribeVoter(address[] memory _bribe, address _voter) external onlyOwner {

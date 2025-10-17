@@ -5,8 +5,9 @@ import "@cryptoalgebra/integral-periphery/contracts/interfaces/IAlgebraCustomPoo
 import "@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol";
 import "@cryptoalgebra/integral-core/contracts/interfaces/vault/IAlgebraCommunityVault.sol";
 import "./interfaces/IAlgebraPoolAPIStorage.sol";
-import "./interfaces/IAlgebraFarmingProxyPluginFactory.sol";
 import "./interfaces/IAlgebraCustomVaultPoolEntryPoint.sol";
+import "./interfaces/IAlgebraBasePluginV1FactoryCustom.sol";
+import "@cryptoalgebra/integral-base-plugin/contracts/interfaces/plugins/IVolatilityOracle.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
@@ -115,17 +116,13 @@ contract CustomPoolDeployer is Initializable, OwnableUpgradeable {
         IAlgebraCommunityVault(vault).transferAlgebraFeeManagerRole(
             algebraFeeManager
         );
-        address newPluginAddress = IAlgebraFarmingProxyPluginFactory(
-            algebraFarmingProxyPluginFactory
-        ).createAlgebraProxyPlugin(
-                customPool,
-                algebraFactory,
-                algebraPluginFactory
-            );
+        address newPluginAddress = IAlgebraBasePluginV1FactoryCustom(algebraPluginFactory)
+            .createPluginForExistingCustomPool(tokenA, tokenB, address(this));
         IAlgebraCustomPoolEntryPoint(entryPoint).setPlugin(
             customPool,
             newPluginAddress
         );
+        IVolatilityOracle(newPluginAddress).initialize();
     }
 
     function beforeCreatePoolHook(

@@ -8,6 +8,8 @@ interface IPairFactory {
     function pairCodeHash() external view returns (bytes32);
     function getPair(address tokenA, address token, bool stable) external view returns (address);
     function createPair(address tokenA, address tokenB, bool stable) external returns (address pair);
-    function isGenesis(address pair) external view returns (bool);
     function getFee(address _pairAddress, bool _stable) external view returns(uint256);
+    function dibs() external view returns (address);
+    function getReferralFee(address _pairAddress) external view returns (uint256);
+    function isPaused() external view returns (bool);
 }

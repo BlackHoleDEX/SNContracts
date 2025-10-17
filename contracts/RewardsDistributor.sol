@@ -47,6 +47,7 @@ contract RewardsDistributor is IRewardsDistributor {
     address public depositor;
 
     IAutoVotingEscrowManager public avm;
+    uint8 public constant MAX_EPOCHS = 20;
 
     constructor(address _voting_escrow) {
         WEEK = BlackTimeLibrary.WEEK;
@@ -144,7 +145,7 @@ contract RewardsDistributor is IRewardsDistributor {
 
         uint supply;
 
-        for (uint i = 0; i < 50; i++) {
+        for (uint i = 0; i < MAX_EPOCHS; i++) {
             if (week_cursor >= _last_token_time) break;
             uint balance_of = IVotingEscrow(ve).balanceOfNFTAt(_tokenId, week_cursor + WEEK - 1);
             supply = IVotingEscrow(ve).totalSupplyAtT(week_cursor + WEEK - 1);
@@ -177,7 +178,7 @@ contract RewardsDistributor is IRewardsDistributor {
         if (week_cursor < _start_time) week_cursor = _start_time;
         uint supply;
 
-        for (uint i = 0; i < 50; i++) {
+        for (uint i = 0; i < MAX_EPOCHS; i++) {
             if (week_cursor >= _last_token_time) break;
             uint balance_of = IVotingEscrow(ve).balanceOfNFTAt(_tokenId, week_cursor + WEEK - 1);
             supply = IVotingEscrow(ve).totalSupplyAtT(week_cursor + WEEK - 1);

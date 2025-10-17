@@ -39,6 +39,11 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     uint256 public totalWeight;
     mapping(uint256 => uint256) public usedWeights;
 
+    // epochStart => pool => weight snapshot
+    mapping(uint256 => mapping(address => uint256)) public epochPoolWeight;
+    // epochStart => totalWeight snapshot
+    mapping(uint256 => uint256) public epochTotalWeight;
+
     mapping(uint256 => uint256) public lastVoted;                     // nft      => timestamp of last vote (this is shifted to thursday of that epoc)
     mapping(uint256 => uint256) public lastVotedTimestamp;            // nft      => timestamp of last vote
 
@@ -80,13 +85,13 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         _;
     }
 
-    modifier Governance() {
-        require(IPermissionsRegistry(permissionRegistry).hasRole("GOVERNANCE",msg.sender), 'GOVERNANCE');
+    modifier EpochManagerOrVoterAdmin() {
+        require(IPermissionsRegistry(permissionRegistry).hasRole("EPOCH_MANAGER", msg.sender) || IPermissionsRegistry(permissionRegistry).hasRole("VOTER_ADMIN",msg.sender), 'EPOCH_MANAGER_OR_VOTER_ADMIN');
         _;
     }
 
-    modifier GenesisManager() {
-        require(IPermissionsRegistry(permissionRegistry).hasRole("GENESIS_MANAGER", msg.sender), 'GENESIS_MANAGER');
+    modifier Governance() {
+        require(IPermissionsRegistry(permissionRegistry).hasRole("GOVERNANCE",msg.sender), 'GOVERNANCE');
         _;
     }
 
@@ -142,6 +147,7 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     function _reset(uint256 _tokenId) internal {
+        uint256 epochNext = BlackTimeLibrary.epochNext(block.timestamp);
         address[] storage _poolVote = poolVote[_tokenId];
         uint256 _poolVoteCnt = _poolVote.length;
         uint256 _totalWeight = 0;
@@ -152,7 +158,7 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
             if (_votes != 0) {
                 weights[_pool] -= _votes;
-
+                epochPoolWeight[epochNext][_pool] = weights[_pool];
                 votes[_tokenId][_pool] -= _votes;
                 address internal_bribe = gaugeManager.fetchInternalBribeFromPool(_pool);
                 address external_bribe = gaugeManager.fetchExternalBribeFromPool(_pool);
@@ -166,6 +172,7 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             }
         }
         totalWeight -= _totalWeight;
+        epochTotalWeight[epochNext] = totalWeight;
         usedWeights[_tokenId] = 0;
         delete poolVote[_tokenId];
     }
@@ -208,6 +215,7 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
     
     function _vote(uint256 _tokenId, address[] memory _poolVote, uint256[] memory _weights) internal {
+        uint256 epochNext = BlackTimeLibrary.epochNext(block.timestamp);
         _reset(_tokenId);
         uint256 _poolCnt = _poolVote.length;
         uint256 _weight = IVotingEscrow(_ve).balanceOfNFT(_tokenId);
@@ -226,10 +234,11 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
                 uint256 _poolWeight = _weights[i] * _weight / _totalVoteWeight;
 
                 require(votes[_tokenId][_pool] == 0, "ZV");
-                require(_poolWeight != 0, "ZV");
+                if (_poolWeight == 0) continue;
 
                 poolVote[_tokenId].push(_pool);
                 weights[_pool] += _poolWeight;
+                epochPoolWeight[epochNext][_pool] = weights[_pool];
 
                 votes[_tokenId][_pool] = _poolWeight;
                 address internal_bribe = gaugeManager.fetchInternalBribeFromPool(_pool);
@@ -244,6 +253,7 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
         if (_usedWeight > 0) IVotingEscrow(_ve).voting(_tokenId);
         totalWeight += _usedWeight;
+        epochTotalWeight[epochNext] = totalWeight;
         usedWeights[_tokenId] = _usedWeight;
     }
 
@@ -276,6 +286,26 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function setGaugeManager(address _gaugeManager) external VoterAdmin {
         require(_gaugeManager != address(0));
         gaugeManager = IGaugeManager(_gaugeManager);
+    }
+
+    /// @notice Get a pool's weight snapshot at a given epoch
+    function getEpochPoolWeight(uint256 epoch, address pool) external view returns (uint256) {
+        return epochPoolWeight[epoch][pool];
+    }
+
+    /// @notice Get total weight snapshot at a given epoch
+    function getEpochTotalWeight(uint256 epoch) external view returns (uint256) {
+        return epochTotalWeight[epoch];
+    }
+
+    function checkpointPoolWeightsForNextEpoch(address pool) external nonReentrant {
+        uint nextEpoch = BlackTimeLibrary.epochNext(block.timestamp);
+        epochPoolWeight[nextEpoch][pool] = weights[pool];
+    }
+
+    function checkpointTotalWeightForNextEpoch() external nonReentrant {
+        uint nextEpoch = BlackTimeLibrary.epochNext(block.timestamp);
+        epochTotalWeight[nextEpoch] = totalWeight;
     }
     
 }

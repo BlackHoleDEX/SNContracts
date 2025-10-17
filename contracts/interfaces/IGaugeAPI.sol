@@ -11,8 +11,6 @@ interface IGaugeAPI {
     function isForPair() external view returns (bool);
     function totalSupply() external view returns (uint);
     function earned(address account) external view returns (uint);
-    function setGenesisPool(address genesisPool) external;
-    function depositsForGenesis(address tokenOwner, uint256 timestamp, uint256 liquidity) external;
     function rewardForDuration() external view returns (uint256);
     function maturityTime(address _account) external view returns (uint256);
 }

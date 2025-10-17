@@ -1,34 +1,35 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 pragma solidity 0.8.13;
 
-import './libraries/Math.sol';
-import './interfaces/IVoter.sol';
-import './interfaces/ITokenHandler.sol';
-import './interfaces/IERC20.sol';
-import './interfaces/IPairInfo.sol';
-import './interfaces/IPairFactory.sol';
-import './interfaces/IVotingEscrow.sol';
-import './interfaces/IPermissionsRegistry.sol';
-import './interfaces/IGaugeFactoryCL.sol';
-import './interfaces/IGaugeManager.sol';
+import "./interfaces/IAlgebraPoolAPIStorage.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import './AVM/interfaces/IAutoVotingEscrowManager.sol';
 import './interfaces/IBribe.sol';
-import './interfaces/IBribeFactory.sol';
-import './interfaces/IGauge.sol';
-import './interfaces/IMinter.sol';
-import './interfaces/IGaugeCL.sol';
 import './interfaces/IBribe.sol';
+import './interfaces/IBribeFactory.sol';
+import './interfaces/IERC20.sol';
+import './interfaces/IGauge.sol';
+import './interfaces/IGaugeCL.sol';
 import './interfaces/IGaugeFactory.sol';
-import {VoterFactoryLib} from "./libraries/VoterFactoryLib.sol";
-import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
-import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import './interfaces/IGaugeFactoryCL.sol';
+import './interfaces/IGaugeManager.sol';
+import './interfaces/IMinter.sol';
+import './interfaces/IPairFactory.sol';
+import './interfaces/IPairInfo.sol';
+import './interfaces/IPermissionsRegistry.sol';
+import './interfaces/ITokenHandler.sol';
+import './interfaces/IVoter.sol';
+import './interfaces/IVotingEscrow.sol';
+import './libraries/Math.sol';
 import '@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol';
 import '@cryptoalgebra/integral-core/contracts/interfaces/vault/IAlgebraCommunityVault.sol';
-import '@cryptoalgebra/integral-farming/contracts/interfaces/IAlgebraEternalFarming.sol';
 import '@cryptoalgebra/integral-farming/contracts/base/IncentiveKey.sol';
+import '@cryptoalgebra/integral-farming/contracts/interfaces/IAlgebraEternalFarming.sol';
+import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
+import {IAlgebraCLFactory} from "./interfaces/IAlgebraCLFactory.sol";
 
 contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
@@ -47,12 +48,15 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     mapping(address => address) public internal_bribes;         // gauge    => internal bribe (only fees)
     mapping(address => address) public external_bribes;         // gauge    => external bribe (real bribes)
     
-    VoterFactoryLib.Data private _factoriesData;
     address public permissionRegistry;  
     address public voter;  
-    address public genesisManager;
-    address public tokenHandler; 
+    address public tokenHandler;
     address public blackGovernor;
+    address public algebraPoolAPIStorage;
+    address public gaugeFactory;
+    address public gaugeFactoryCL;
+    address public pairFactory;
+    address public pairFactoryCL;
 
     mapping(address => bool) public isGauge;                    // gauge    => boolean [is a gauge?]
     mapping(address => bool) public isCLGauge;
@@ -69,11 +73,14 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     event GaugeRevived(address indexed gauge);
     event NotifyReward(address indexed sender, address indexed reward, uint256 amount);
     event DistributeReward(address indexed sender, address indexed gauge, uint256 amount);
-    event SetBribeFor(bool isInternal, address indexed old, address indexed latest, address indexed gauge);
     event SetMinter(address indexed old, address indexed latest);
     event SetBribeFactory(address indexed old, address indexed latest);
-    event SetGenesisManager(address indexed old, address indexed latest);
     event SetPermissionRegistry(address indexed old, address indexed latest);
+    event SetAlgebraPoolAPIStorage(address indexed old, address indexed latest);
+    event SetGaugeFactory(address indexed old, address indexed latest);
+    event SetGaugeFactoryCL(address indexed old, address indexed latest);
+    event SetPairFactory(address indexed old, address indexed latest);
+    event SetPairFactoryCL(address indexed old, address indexed latest);
     mapping(address => uint256) public feeDistributionTimestmap;// gauge    => last Distribution Time
 
     constructor() {}
@@ -85,11 +92,11 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
       _ve = __ve;  
       base = IVotingEscrow(__ve).token();  
       tokenHandler = _tokenHandler;
-       permissionRegistry = _permissionRegistory;
-      _factoriesData.gaugeFactories.push(_gaugeFactory);
-      _factoriesData.gaugeFactories.push(_gaugeFactoryCL);
-      _factoriesData.pairFactories.push(_pairFactory);
-      _factoriesData.pairFactories.push(_pairFactoryCL);
+      permissionRegistry = _permissionRegistory;
+      gaugeFactory = _gaugeFactory;
+      gaugeFactoryCL = _gaugeFactoryCL;
+      pairFactory = _pairFactory;
+      pairFactoryCL = _pairFactoryCL;
     }
 
     modifier GaugeAdmin() {
@@ -123,19 +130,21 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         permissionRegistry = _permissionRegistry;
     }
 
+    /// @notice Set a new algebraPoolAPIStorage
+    function setAlgebraPoolApiStorage(address _algebraPoolAPIStorage) external onlyOwner {
+        require(_algebraPoolAPIStorage.code.length > 0, "CODELEN");
+        require(_algebraPoolAPIStorage != address(0), "ZA");
+        require(_algebraPoolAPIStorage != algebraPoolAPIStorage, "NA");
+        emit SetAlgebraPoolAPIStorage(algebraPoolAPIStorage, _algebraPoolAPIStorage);
+        algebraPoolAPIStorage = _algebraPoolAPIStorage;
+    }
+
     function setVoter(address _voter) external GaugeAdmin{
         require(_voter.code.length > 0, "CODELEN");
         require(_voter != address(0), "ZA");
         voter = _voter;
     }
 
-    /// @notice Set a new Minter
-    function setGenesisManager(address _genesisManager) external GaugeAdmin {
-        require(_genesisManager != address(0), "ZA");
-        require(_genesisManager.code.length > 0, "CODELEN");
-        emit SetGenesisManager(genesisManager, _genesisManager);
-        genesisManager = _genesisManager;
-    }
 
     function getBlackGovernor() external view returns (address){
         return blackGovernor;
@@ -186,16 +195,9 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     ///         Make sure to use the corrcet gaugeType or it will fail
 
     function _createGauge(address _pool, uint256 _gaugeType, address bonusRewardToken) internal returns (address _gauge, address _internal_bribe, address _external_bribe) {
-        require(_gaugeType < _factoriesData.pairFactories.length, "GAUGETYPE");
         require(gauges[_pool] == address(0x0), "DNE");
         require(_pool.code.length > 0, "CODELEN");
         bool isPair;
-        address bonusRewardToken = bonusRewardToken;
-        address _factory = _factoriesData.pairFactories[_gaugeType];
-        address _gaugeFactory = _factoriesData.gaugeFactories[_gaugeType];
-        require(_factory != address(0), "ZA");
-        require(_gaugeFactory != address(0), "ZA");
-        
 
         address tokenA = address(0);
         address tokenB = address(0);
@@ -204,26 +206,38 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         // for future implementation add isPair() in factory
         if(_gaugeType == 0){
-            isPair = IPairFactory(_factory).isPair(_pool);
+            isPair = IPairFactory(pairFactory).isPair(_pool);
         } 
         if(_gaugeType == 1) {
-            // removed due to code size
-            // require(_pool_hyper == _pool_factory, 'wrong tokens');    
-            isPair = true;
+            /**
+            As long as pools are created by our own custom pool deployer, we are allowing to create gauges.
+            */
+            address customDeployer = IAlgebraPoolAPIStorage(algebraPoolAPIStorage).pairToDeployer(_pool);
+            if ((customDeployer != address(0))) {
+                address _poolAddress = IAlgebraCLFactory(pairFactoryCL).customPoolByPair(customDeployer, tokenA, tokenB);
+                isPair = (_poolAddress == _pool);
+            }
         }
 
         require(ITokenHandler(tokenHandler).isWhitelisted(tokenA) && ITokenHandler(tokenHandler).isWhitelisted(tokenB), "!WHITELISTED");
         require(ITokenHandler(tokenHandler).isConnector(tokenA) || ITokenHandler(tokenHandler).isConnector(tokenB), "!CONNECTOR");
-        require(isPair, "!POOL");
+        // If not a recognized pair/pool, only GaugeAdmin may proceed
+        if (!isPair) {
+            require(IPermissionsRegistry(permissionRegistry).hasRole("GAUGE_ADMIN",msg.sender), 'GAUGE_ADMIN');
+        }
         require(tokenA != address(0) && tokenB != address(0), "!TOKENS");
 
         (_internal_bribe, _external_bribe) = _deployBribes(_pool, tokenA, tokenB, _gaugeType);
-        // create gauge
-        if(_gaugeType == 0) {
-            _gauge = IGaugeFactory(_gaugeFactory).createGauge(base, _ve, _pool, address(this), _internal_bribe, _external_bribe, isPair, genesisManager);
+        // create basic pair gauge when gaugeType is 0 or not a recognized pair (To allow single token gauges)
+        if(_gaugeType == 0 || !isPair) {
+            _gauge = IGaugeFactory(gaugeFactory).createGauge(base, _ve, _pool, address(this), _internal_bribe, _external_bribe, isPair);
         }
         if(_gaugeType == 1) {
-            _gauge = IGaugeFactoryCL(_gaugeFactory).createGauge(base, _ve, _pool, address(this), _internal_bribe, _external_bribe, isPair, farmingParam, bonusRewardToken);
+            if (bonusRewardToken == address(0)) {
+                bonusRewardToken = base;
+            }
+            require(ITokenHandler(tokenHandler).isConnector(bonusRewardToken), "!BONUS_CONNECTOR");
+            _gauge = IGaugeFactoryCL(gaugeFactoryCL).createGauge(base, _ve, _pool, address(this), _internal_bribe, _external_bribe, farmingParam, bonusRewardToken);
             isCLGauge[_gauge] = true;
             setGaugeAsCommunityFeeReceiver(_gauge, _pool);
         }
@@ -299,13 +313,27 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         IERC20Upgradeable(base).safeTransferFrom(msg.sender, address(this), amount);
 
         uint256 _ratio = 0;
-        uint256 totalWeight = IVoter(voter).totalWeight();
-        if(totalWeight > 0) _ratio = amount * 1e18 / Math.max(totalWeight, 1);     // 1e18 adjustment is removed during claim
+        uint256 epochStart = BlackTimeLibrary.epochStart(block.timestamp);
+        uint256 totalWeight = IVoter(voter).getEpochTotalWeight(epochStart);
+        require(totalWeight > 0, "NO_EPOCH_WEIGHTS");
+        _ratio = amount * 1e18 / totalWeight;     // 1e18 adjustment is removed during claim
         if (_ratio > 0) {
             index += _ratio;
         }
 
         emit NotifyReward(msg.sender, base, amount);
+    }
+
+
+    function carryForwardTotalVotesForNextEpoch() external nonReentrant EpochManagerOrGaugeAdmin {
+        IVoter(voter).checkpointTotalWeightForNextEpoch();
+    }
+
+    function carryForwardVotesForNextEpoch(uint256 _start, uint256 _finish) external nonReentrant EpochManagerOrGaugeAdmin {
+        for (uint256 x = _start; x < _finish; x++) {
+            address _pool = pools[x];
+            IVoter(voter).checkpointPoolWeightsForNextEpoch(_pool);
+        }
     }
 
     function distributeFees() external nonReentrant GaugeAdmin {
@@ -403,6 +431,21 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
+    /// @notice distribute rewards for given gauges and rewards
+    function distributeRewards(address[] memory _gauges, uint256[] memory _rewards) external nonReentrant GaugeAdmin {
+        require(_gauges.length == _rewards.length, "Length mismatch");
+        for (uint256 x = 0; x < _gauges.length; x++) {
+            if(!isCLGauge[_gauges[x]]) {
+                IGauge(_gauges[x]).notifyRewardAmount(base, _rewards[x]);
+            } else {
+                (IncentiveKey memory incentivekey, uint256 rewardRate, uint128 bonusRewardRate) =
+                    IGaugeCL(_gauges[x]).notifyRewardAmount(base, _rewards[x]);
+                IAlgebraEternalFarming(farmingParam.algebraEternalFarming).setRates(incentivekey, uint128(rewardRate), bonusRewardRate);
+            }
+            emit DistributeReward(msg.sender, _gauges[x], _rewards[x]);
+        }
+    }
+
 
     /* -----------------------------------------------------------------------------
     --------------------------------------------------------------------------------
@@ -418,7 +461,8 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function _updateForAfterDistribution(address _gauge) private {
         address _pool = poolForGauge[_gauge];
         //uint256 _supplied = weightsPerEpoch[_time][_pool];
-        uint256 _supplied = IVoter(voter).weights(_pool);
+        uint256 epochStart = BlackTimeLibrary.epochStart(block.timestamp);
+        uint256 _supplied = IVoter(voter).getEpochPoolWeight(epochStart, _pool);
 
         if (_supplied > 0) {
             uint256 _supplyIndex = supplyIndex[_gauge];
@@ -482,38 +526,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         farmingParam = IGaugeManager.FarmingParam(_farmingCenter, _algebraEternalFarming, _nfpm);
     }
 
-      /// @notice Set a new bribes for a given gauge
-    function setNewBribes(address _gauge, address _internal, address _external) external GaugeAdmin {
-        require(isGauge[_gauge], "!GAUGE");
-        require(_gauge.code.length > 0, "CODELEN");
-        _setInternalBribe(_gauge, _internal);
-        _setExternalBribe(_gauge, _external);
-    }
-
-    /// @notice Set a new internal bribe for a given gauge
-    function setInternalBribeFor(address _gauge, address _internal) external GaugeAdmin {
-        require(isGauge[_gauge], "!GAUGE");
-        _setInternalBribe(_gauge, _internal);
-    }
-
-    /// @notice Set a new External bribe for a given gauge
-    function setExternalBribeFor(address _gauge, address _external) external GaugeAdmin {
-        require(isGauge[_gauge], "!GAUGE");
-        _setExternalBribe(_gauge, _external);
-    }
-
-    function _setInternalBribe(address _gauge, address _internal) private {
-        require(_internal.code.length > 0, "CODELEN");
-        emit SetBribeFor(true, internal_bribes[_gauge], _internal, _gauge);
-        internal_bribes[_gauge] = _internal;
-    }
-
-    function _setExternalBribe(address _gauge, address _external) private {
-        require(_external.code.length > 0, "CODELEN");
-        emit SetBribeFor(false, internal_bribes[_gauge], _external, _gauge);
-        external_bribes[_gauge] = _external;
-    }
-
     /// @notice claim LP gauge rewards
     function claimRewards(address[] memory _gauges) external {
         uint gaugesLen = _gauges.length;
@@ -522,13 +534,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
-    /// @notice claim LP gauge rewards
-    function claimRewards(address _gauge, uint256[] memory _nftIds, bool isBonusReward) external {
-        uint nftIdsLen = _nftIds.length;
-        for (uint256 i = 0; i < nftIdsLen; i++) {
-            IGaugeCL(_gauge).getReward(_nftIds[i], isBonusReward);
-        }
-    }
 
     /// @notice claim bribes rewards given a TokenID
     function claimBribes(address[] memory _bribes, address[][] memory _tokens, uint256 _tokenId) external {
@@ -539,15 +544,15 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
-    function fetchInternalBribeFromPool(address _pool) external returns (address) {
+    function fetchInternalBribeFromPool(address _pool) external view returns (address) {
         return internal_bribes[gauges[_pool]];
     }
 
-    function fetchExternalBribeFromPool(address _pool) external returns (address) {
+    function fetchExternalBribeFromPool(address _pool) external view returns (address) {
         return external_bribes[gauges[_pool]];
     }
 
-    function isGaugeAliveForPool(address _pool) external returns (bool) {
+    function isGaugeAliveForPool(address _pool) external view returns (bool) {
         return isGauge[gauges[_pool]] && isAlive[gauges[_pool]];
     }
 
@@ -559,28 +564,36 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         minter = _minter;
     }
 
-    function addGaugeFactory(address _gaugeFactory) external GaugeAdmin {
-        VoterFactoryLib.addGaugeFactory(_factoriesData, _gaugeFactory);
+    function updateGaugeFactory(address _gaugeFactory) external GaugeAdmin {
+        require(_gaugeFactory != address(0), "ZA");
+        require(_gaugeFactory.code.length > 0, "CODELEN");
+        require(_gaugeFactory != gaugeFactory, "NA");
+        gaugeFactory = _gaugeFactory;
+        emit SetGaugeFactory(gaugeFactory, _gaugeFactory);
     }
 
-    function replaceGaugeFactory(address _gaugeFactory, uint256 _pos) external GaugeAdmin {
-        VoterFactoryLib.replaceGaugeFactory(_factoriesData, _gaugeFactory, _pos);
+    function updateGaugeFactoryCL(address _gaugeFactoryCL) external GaugeAdmin {
+        require(_gaugeFactoryCL != address(0), "ZA");
+        require(_gaugeFactoryCL.code.length > 0, "CODELEN");
+        require(_gaugeFactoryCL != gaugeFactoryCL, "NA");
+        gaugeFactoryCL = _gaugeFactoryCL;
+        emit SetGaugeFactoryCL(gaugeFactoryCL, _gaugeFactoryCL);
     }
 
-    function removeGaugeFactory(uint256 _pos) external GaugeAdmin {
-        VoterFactoryLib.removeGaugeFactory(_factoriesData, _pos);
+    function updatePairFactory(address _pairFactory) external GaugeAdmin {
+        require(_pairFactory != address(0), "ZA");
+        require(_pairFactory.code.length > 0, "CODELEN");
+        require(_pairFactory != pairFactory, "NA");
+        pairFactory = _pairFactory;
+        emit SetPairFactory(pairFactory, _pairFactory);
     }
 
-    function addPairFactory(address _pairFactory) external GaugeAdmin {
-        VoterFactoryLib.addPairFactory(_factoriesData, _pairFactory);
-    }
-
-    function replacePairFactory(address _pairFactory, uint256 _pos) external GaugeAdmin {
-        VoterFactoryLib.replacePairFactory(_factoriesData, _pairFactory, _pos);
-    }
-
-    function removePairFactory(uint256 _pos) external GaugeAdmin {
-        VoterFactoryLib.removePairFactory(_factoriesData, _pos);
+    function updatePairFactoryCL(address _pairFactoryCL) external GaugeAdmin {
+        require(_pairFactoryCL != address(0), "ZA");
+        require(_pairFactoryCL.code.length > 0, "CODELEN");
+        require(_pairFactoryCL != pairFactoryCL, "NA");
+        pairFactoryCL = _pairFactoryCL;
+        emit SetPairFactoryCL(pairFactoryCL, _pairFactoryCL);
     }
     
     function setAVM(address _avm) external GaugeAdmin {
@@ -593,7 +606,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     function version() external view returns (string memory version) {
-        version  = "GaugeManager v1.0.2";
+        version  = "GaugeManager v1.0.0";
     }
 
     function length() external view returns(uint) {

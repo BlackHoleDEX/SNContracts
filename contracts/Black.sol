@@ -5,8 +5,8 @@ import "./interfaces/IBlack.sol";
 
 contract Black is IBlack {
 
-    string public constant name = "BLACKHOLE";
-    string public constant symbol = "BLACK";
+    string public constant name = "SUPERNOVA";
+    string public constant symbol = "SNOVA";
     uint8 public constant decimals = 18;
     uint public totalSupply = 0;
 
