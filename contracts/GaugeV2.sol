@@ -38,7 +38,6 @@ contract GaugeV2 is ReentrancyGuard, Ownable {
 
     uint256 internal _totalSupply;
     mapping(address => uint256) internal _balances;
-    mapping(address => uint256) public maturityTime;
 
     event RewardAdded(uint256 reward);
     event Deposit(address indexed user, uint256 amount);
@@ -214,7 +213,6 @@ contract GaugeV2 is ReentrancyGuard, Ownable {
     function _withdraw(uint256 amount) internal nonReentrant isNotEmergency updateReward(msg.sender) {
         require(amount > 0, "ZV");
         require(_balanceOf(msg.sender) > 0, "ZV");
-        require(block.timestamp >= maturityTime[msg.sender], "!MATURE");
 
         _totalSupply = _totalSupply - amount;
         _deductBalance(amount);

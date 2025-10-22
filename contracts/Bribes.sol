@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 pragma solidity 0.8.13;
 
-import "./interfaces/IMinter.sol";
 import "./interfaces/IVoter.sol";
 import "./interfaces/IGaugeManager.sol";
 import "./interfaces/IVotingEscrow.sol";
 import "./interfaces/ITokenHandler.sol";
-import {IAutoVotingEscrowManager} from "./AVM/interfaces/IAutoVotingEscrowManager.sol";
-import {IAutoVotingEscrow} from "./AVM/interfaces/IAutoVotingEscrow.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -38,7 +35,6 @@ contract Bribe is ReentrancyGuard {
     address public minter;
     address public immutable ve;
     address public owner;
-    address public avm; // does it need to be immutable?
     ITokenHandler public tokenHandler;
     uint8 public constant MAX_EPOCHS = 20;
 
@@ -70,7 +66,6 @@ contract Bribe is ReentrancyGuard {
         tokenHandler = ITokenHandler(_tokenHandler);
         ve = IVoter(_voter)._ve();
         minter = IGaugeManager(_gaugeManager).minter();
-        avm = IVotingEscrow(ve).avm();
         require(minter != address(0), "ZA");
         owner = _owner;
         TYPE = _type;
@@ -79,10 +74,6 @@ contract Bribe is ReentrancyGuard {
         bribeTokens.push(_token1);
         isBribeToken[_token0] = true;
         isBribeToken[_token1] = true;
-    }
-
-    function getEpochStart() public view returns(uint256){
-        return IMinter(minter).active_period();
     }
 
     /// @notice get next epoch (where bribes are saved)
@@ -265,11 +256,6 @@ contract Bribe is ReentrancyGuard {
     /// @notice Claim the TOKENID rewards
     function getReward(uint256 tokenId, address[] memory tokens) external nonReentrant  {
         address _owner = IVotingEscrow(ve).ownerOf(tokenId);
-        if(IAutoVotingEscrowManager(avm).tokenIdToAVMId(tokenId) > 0) {
-            uint idx = IAutoVotingEscrowManager(avm).tokenIdToAVMId(tokenId)-1;
-            IAutoVotingEscrow[] memory avmList = IAutoVotingEscrowManager(avm).getAVMs();
-            _owner = address(avmList[idx]);
-        }
         require(msg.sender == gaugeManager, "NA");
         uint256 _length = tokens.length;
         for (uint256 i = 0; i < _length; i++) {
@@ -334,12 +320,6 @@ contract Bribe is ReentrancyGuard {
     function setMinter(address _minter) external onlyAllowed {
         require(_minter != address(0), "ZA");
         minter = _minter;
-    }
-
-    /// @notice Set a new AVM 
-    function setAVM(address _avm) external onlyAllowed {
-        require(_avm!=address(0), "ZA");
-        avm = _avm;
     }
 
     /// @notice Set a new Owner

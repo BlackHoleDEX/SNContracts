@@ -6,7 +6,6 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import './AVM/interfaces/IAutoVotingEscrowManager.sol';
 import './interfaces/IBribe.sol';
 import './interfaces/IBribe.sol';
 import './interfaces/IBribeFactory.sol';
@@ -62,8 +61,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     mapping(address => bool) public isCLGauge;
     mapping(address => bool) public isAlive;                    // gauge    => boolean [is the gauge alive?]
     IGaugeManager.FarmingParam public farmingParam;
-
-    IAutoVotingEscrowManager public avm;
 
     bytes32 public constant COMMUNITY_FEE_WITHDRAWER_ROLE = keccak256('COMMUNITY_FEE_WITHDRAWER');
     bytes32 public constant COMMUNITY_FEE_VAULT_ADMINISTRATOR = keccak256('COMMUNITY_FEE_VAULT_ADMINISTRATOR');
@@ -537,7 +534,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice claim bribes rewards given a TokenID
     function claimBribes(address[] memory _bribes, address[][] memory _tokens, uint256 _tokenId) external {
-        require(IVotingEscrow(_ve).isApprovedOrOwner(msg.sender, _tokenId) || (address(avm)!= address(0) && avm.getOriginalOwner(_tokenId) == msg.sender), "NAO");
+        require(IVotingEscrow(_ve).isApprovedOrOwner(msg.sender, _tokenId), "NAO");
         uint bribesLen = _bribes.length;
         for (uint256 i = 0; i < bribesLen; i++) {
             IBribe(_bribes[i]).getReward(_tokenId, _tokens[i]);
@@ -568,36 +565,32 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         require(_gaugeFactory != address(0), "ZA");
         require(_gaugeFactory.code.length > 0, "CODELEN");
         require(_gaugeFactory != gaugeFactory, "NA");
-        gaugeFactory = _gaugeFactory;
         emit SetGaugeFactory(gaugeFactory, _gaugeFactory);
+        gaugeFactory = _gaugeFactory;
     }
 
     function updateGaugeFactoryCL(address _gaugeFactoryCL) external GaugeAdmin {
         require(_gaugeFactoryCL != address(0), "ZA");
         require(_gaugeFactoryCL.code.length > 0, "CODELEN");
         require(_gaugeFactoryCL != gaugeFactoryCL, "NA");
-        gaugeFactoryCL = _gaugeFactoryCL;
         emit SetGaugeFactoryCL(gaugeFactoryCL, _gaugeFactoryCL);
+        gaugeFactoryCL = _gaugeFactoryCL;
     }
 
     function updatePairFactory(address _pairFactory) external GaugeAdmin {
         require(_pairFactory != address(0), "ZA");
         require(_pairFactory.code.length > 0, "CODELEN");
         require(_pairFactory != pairFactory, "NA");
-        pairFactory = _pairFactory;
         emit SetPairFactory(pairFactory, _pairFactory);
+        pairFactory = _pairFactory;
     }
 
     function updatePairFactoryCL(address _pairFactoryCL) external GaugeAdmin {
         require(_pairFactoryCL != address(0), "ZA");
         require(_pairFactoryCL.code.length > 0, "CODELEN");
         require(_pairFactoryCL != pairFactoryCL, "NA");
-        pairFactoryCL = _pairFactoryCL;
         emit SetPairFactoryCL(pairFactoryCL, _pairFactoryCL);
-    }
-    
-    function setAVM(address _avm) external GaugeAdmin {
-        avm = IAutoVotingEscrowManager(_avm);
+        pairFactoryCL = _pairFactoryCL;
     }
 
     function acceptAlgebraFeeChangeProposal (address _pool, uint16 newAlgebraFee) external GaugeAdmin {

@@ -12,7 +12,6 @@ interface IBribe {
     function setOwner(address _Voter) external;
     function emergencyRecoverERC20(address tokenAddress, uint256 tokenAmount) external;
     function recoverERC20AndUpdateData(address tokenAddress, uint256 tokenAmount) external;
-    function setAVM(address _avm) external;
 }
 
 contract BribeFactoryV3 is OwnableUpgradeable {
@@ -98,14 +97,6 @@ contract BribeFactoryV3 is OwnableUpgradeable {
         uint i = 0;
         for(i; i< _bribe.length; i++){
             IBribe(_bribe[i]).setVoter(_voter);
-        }
-    }
-
-    /// @notice set a new avm in given bribes
-    function setBribeAVM(address[] memory _bribe, address _avm) external onlyOwner {
-        uint i=0;
-        for(i; i<_bribe.length; i++){
-            IBribe(_bribe[i]).setAVM(_avm);
         }
     }
 

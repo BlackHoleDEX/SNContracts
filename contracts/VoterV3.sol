@@ -9,7 +9,6 @@ import './interfaces/IPairFactory.sol';
 import './interfaces/IVotingEscrow.sol';
 import './interfaces/IGaugeManager.sol';
 import './interfaces/IPermissionsRegistry.sol';
-import "./AVM/interfaces/IAutoVotingEscrowManager.sol";
 import './interfaces/ITokenHandler.sol';
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -21,7 +20,6 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
     address public _ve;                                         // the ve token that governs these contracts
-    address public avm;
     address internal base;                                      // $the token
     address public permissionRegistry;                          // registry to check accesses
     address[] public pools;                                     // all pools viable for incentives
@@ -64,7 +62,6 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         __ReentrancyGuard_init();
         _ve = __ve;
         base = IVotingEscrow(__ve).token();
-        avm = IVotingEscrow(__ve).avm();
         gaugeManager = IGaugeManager(_gaugeManager);
         permissionRegistry = _permissionRegistry;
         tokenHandler = _tokenHandler;
@@ -85,13 +82,13 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         _;
     }
 
-    modifier EpochManagerOrVoterAdmin() {
-        require(IPermissionsRegistry(permissionRegistry).hasRole("EPOCH_MANAGER", msg.sender) || IPermissionsRegistry(permissionRegistry).hasRole("VOTER_ADMIN",msg.sender), 'EPOCH_MANAGER_OR_VOTER_ADMIN');
+    modifier Governance() {
+        require(IPermissionsRegistry(permissionRegistry).hasRole("GOVERNANCE",msg.sender), 'GOVERNANCE');
         _;
     }
 
-    modifier Governance() {
-        require(IPermissionsRegistry(permissionRegistry).hasRole("GOVERNANCE",msg.sender), 'GOVERNANCE');
+    modifier onlyGaugeManager() {
+        require(msg.sender == address(gaugeManager), "N_G_M");
         _;
     }
 
@@ -124,10 +121,6 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function setMaxVotingNum(uint256 _maxVotingNum) external VoterAdmin {
         require (_maxVotingNum >= MIN_VOTING_NUM, "LOW_VOTE");
         maxVotingNum = _maxVotingNum;
-    }
-
-    function setAVM() external VoterAdmin {
-        avm = IVotingEscrow(_ve).avm();
     }
 
     /* -----------------------------------------------------------------------------
@@ -206,8 +199,8 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         require(_poolVote.length == _weights.length, "MISMATCH_LEN");
         require(_poolVote.length <= maxVotingNum, "EXCEEDS");
         uint256 _timestamp = block.timestamp;
-        if ((_timestamp >= BlackTimeLibrary.epochVoteEnd(_timestamp)) && !ITokenHandler(tokenHandler).isWhitelistedNFT(_tokenId) && (IAutoVotingEscrowManager(avm).tokenIdToAVMId(_tokenId)) == (0)){
-            revert("AVM_W");
+        if ((_timestamp >= BlackTimeLibrary.epochVoteEnd(_timestamp)) && !ITokenHandler(tokenHandler).isWhitelistedNFT(_tokenId)){
+            revert("DW");
         }
         _vote(_tokenId, _poolVote, _weights);
         lastVoted[_tokenId] = BlackTimeLibrary.epochStart(block.timestamp) + 1;
@@ -298,12 +291,12 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         return epochTotalWeight[epoch];
     }
 
-    function checkpointPoolWeightsForNextEpoch(address pool) external nonReentrant {
+    function checkpointPoolWeightsForNextEpoch(address pool) external onlyGaugeManager {
         uint nextEpoch = BlackTimeLibrary.epochNext(block.timestamp);
         epochPoolWeight[nextEpoch][pool] = weights[pool];
     }
 
-    function checkpointTotalWeightForNextEpoch() external nonReentrant {
+    function checkpointTotalWeightForNextEpoch() external onlyGaugeManager {
         uint nextEpoch = BlackTimeLibrary.epochNext(block.timestamp);
         epochTotalWeight[nextEpoch] = totalWeight;
     }

@@ -16,7 +16,6 @@ import '../interfaces/IGaugeFactoryCL.sol';
 
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "../AVM/interfaces/IAutoVotingEscrowManager.sol";
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 
 import "hardhat/console.sol";
@@ -132,7 +131,6 @@ contract veNFTAPI is Initializable {
 
 
     address public owner;
-    IAutoVotingEscrowManager public avm;
     event Owner(address oldOwner, address newOwner);
 
     struct AllPairRewards {
@@ -190,31 +188,6 @@ contract veNFTAPI is Initializable {
             if(_id != 0){
                 venft[i] = _getNFTFromId(_id, _user);
             }
-        }
-
-        return venft;
-    }
-
-    function getAVMNFTFromAddress(address _user) public view returns (veNFT[] memory) {
-        IAutoVotingEscrow[] memory avms = avm.getAVMs(); // assuming avms() is a function
-        veNFT[] memory temp = new veNFT[](1000) ; // ✅ DECLARATION — fixed-size temporary memory array
-        uint count = 0;
-
-        for (uint256 i = 0; i < avms.length; i++) {
-            IAutoVotingEscrow.LockInfo[] memory locks = avms[i].getLocks(); // assuming locks() is a function
-            for (uint256 j = 0; j < locks.length; j++) {
-                IAutoVotingEscrow.LockInfo memory _lock = locks[j];
-                if (_lock.owner == _user) {
-                    temp[count] = _getNFTFromId(_lock.tokenId, address(avms[i]));
-                    count++;
-                }
-            }
-        }
-
-        // Final array trimmed to correct size
-        veNFT[] memory venft = new veNFT[](count);
-        for (uint256 i = 0; i < count; i++) {
-            venft[i] = temp[i];
         }
 
         return venft;
@@ -293,38 +266,27 @@ contract veNFTAPI is Initializable {
 
             return (totNFTs, hasNext, _lockReward);
         }
-        veNFT[] memory avmNFTsOfUser = getAVMNFTFromAddress(_user);
 
         totNFTs = ve.balanceOf(_user);
 
-        uint length = _amounts < (totNFTs + avmNFTsOfUser.length) ? _amounts : (totNFTs + avmNFTsOfUser.length);
+        uint length = _amounts < totNFTs ? _amounts : totNFTs;
         _lockReward = new LockReward[](length);
-
-
-        // int length = avmNFTsOfUser.length;
 
         uint i = _offset;
         uint256 nftId;
         hasNext = true;
 
         for(i; i < _offset + _amounts; i++){ // need to be amounts right
-            if(i >= (totNFTs + avmNFTsOfUser.length)) {
+            if(i >= totNFTs) {
                 hasNext = false;
                 break;
             }
-            if(i < totNFTs) {
-                nftId = ve.tokenOfOwnerByIndex(_user, i);
-            } else {
-                uint avmIndex = i - totNFTs;
-                nftId = avmNFTsOfUser[avmIndex].id;
-            }
+            nftId = ve.tokenOfOwnerByIndex(_user, i);
 
             _lockReward[i-_offset].id = nftId;
             _lockReward[i-_offset].lockedAmount = uint128(ve.locked(nftId).amount);
             _lockReward[i-_offset].pairRewards = _getRewardsForNft(nftId);
         }
-
-        totNFTs += avmNFTsOfUser.length;
     }
 
     function _getRewardsForNft(uint nftId) internal view returns (PairReward[] memory pairReward) {
@@ -455,11 +417,6 @@ contract veNFTAPI is Initializable {
         require(msg.sender == owner);
 
         voter = IVoter(_voter);
-    }
-
-    function setAVM(address _avm) external {
-        require(msg.sender == owner && _avm!=address(0));
-        avm = IAutoVotingEscrowManager(_avm);
     }
 
     function setGaugeManager(address _gaugeManager) external  {

@@ -4,7 +4,6 @@ pragma solidity 0.8.13;
 import './libraries/Math.sol';
 import './interfaces/IERC20.sol';
 import './interfaces/IRewardsDistributor.sol';
-import './AVM/interfaces/IAutoVotingEscrowManager.sol';
 import './interfaces/IVotingEscrow.sol';
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 
@@ -46,7 +45,6 @@ contract RewardsDistributor is IRewardsDistributor {
     address public token;
     address public depositor;
 
-    IAutoVotingEscrowManager public avm;
     uint8 public constant MAX_EPOCHS = 20;
 
     constructor(address _voting_escrow) {
@@ -205,9 +203,6 @@ contract RewardsDistributor is IRewardsDistributor {
             // If lock has expired and is not permanent, transfer tokens directly
             if (_locked.end < block.timestamp && !_locked.isPermanent) {
                 address _nftOwner = IVotingEscrow(voting_escrow).ownerOf(_tokenId);
-                if (address(avm) != address(0) && avm.tokenIdToAVMId(_tokenId) != 0) {
-                    _nftOwner = avm.getOriginalOwner(_tokenId);
-                }
                 IERC20(token).transfer(_nftOwner, amount);
             } else {
                 IVotingEscrow(voting_escrow).deposit_for(_tokenId, amount);
@@ -233,9 +228,6 @@ contract RewardsDistributor is IRewardsDistributor {
                 IVotingEscrow.LockedBalance memory _locked = IVotingEscrow(_voting_escrow).locked(_tokenId);
                 if(_locked.end < block.timestamp && !_locked.isPermanent){
                     address _nftOwner = IVotingEscrow(_voting_escrow).ownerOf(_tokenId);
-                    if (address(avm) != address(0) && avm.tokenIdToAVMId(_tokenId) != 0) {
-                        _nftOwner = avm.getOriginalOwner(_tokenId);
-                    }
                     IERC20(token).transfer(_nftOwner, amount);
                 } else {
                     IVotingEscrow(_voting_escrow).deposit_for(_tokenId, amount);
@@ -265,10 +257,5 @@ contract RewardsDistributor is IRewardsDistributor {
         require(_token != address(0));
         uint256 _balance = IERC20(_token).balanceOf(address(this));
         IERC20(_token).transfer(msg.sender, _balance);
-    }
-
-    function setAVM(address _avm) external onlyOwner {
-        require(_avm != address(0), "ZA");
-        avm = IAutoVotingEscrowManager(_avm);
     }
 }

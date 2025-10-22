@@ -310,7 +310,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         _safeTransferFrom(tokenA, msg.sender, pair, amountA);
         _safeTransferFrom(tokenB, msg.sender, pair, amountB);
 
-        // Verify total supply hasn't changed unexpectedly (frontrunning protection)
+        // Verify total supply hasn't changed unexpectedly (frontrunning protection
         uint totalSupplyAfter = IERC20(pair).totalSupply();
         require(totalSupplyAfter == totalSupplyBefore, 'FLP'); // Frontrunning Liquidity Protection
 

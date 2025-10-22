@@ -9,4 +9,5 @@ interface IVotingDelegation {
 
     function getLatestTokenIds(address account) external view returns (uint[] memory);
     function getTokenIdsAt(address account, uint32 index) external view returns (uint[] memory);
+    function getTokenIdsAtTimestamp(address account, uint timestamp) external view returns (uint[] memory);
 }

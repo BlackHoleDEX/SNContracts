@@ -11,8 +11,8 @@ contract VotingDelegationLib is IVotingDelegation {
     }
 
     // storage of checkpoints per account
-    mapping(address => mapping(uint32 => Checkpoint)) internal checkpoints;
-    mapping(address => uint32) internal numCheckpoints;
+    mapping(address => mapping(uint32 => Checkpoint)) public checkpoints;
+    mapping(address => uint32) public numCheckpoints;
 
     uint public constant MAX_DELEGATES = 1024;
 
@@ -22,6 +22,11 @@ contract VotingDelegationLib is IVotingDelegation {
 
     constructor() {
         team = msg.sender;
+    }
+
+    modifier onlyVotingEscrow() {
+        require(msg.sender == address(votingEscrow), "Not voting escrow");
+        _;
     }
 
     function setTeam(address _team) external {
@@ -46,7 +51,7 @@ contract VotingDelegationLib is IVotingDelegation {
         }
     }
 
-    function moveTokenDelegates(address srcRep, address dstRep, uint _tokenId) external override {
+    function moveTokenDelegates(address srcRep, address dstRep, uint _tokenId) external override onlyVotingEscrow {
         if (srcRep != dstRep && _tokenId > 0) {
             if (srcRep != address(0)) {
                 uint32 srcRepNum = numCheckpoints[srcRep];
@@ -98,7 +103,7 @@ contract VotingDelegationLib is IVotingDelegation {
         }
     }
 
-    function moveAllDelegates(address owner, address srcRep, address dstRep) external override {
+    function moveAllDelegates(address owner, address srcRep, address dstRep) external override onlyVotingEscrow {
         address _owner = owner;
         address _srcRep = srcRep;
         address _dstRep = dstRep;
@@ -158,7 +163,7 @@ contract VotingDelegationLib is IVotingDelegation {
         }
     }
 
-    function getPastVotesIndex(address account, uint timestamp) external view override returns (uint32) {
+    function getPastVotesIndex(address account, uint timestamp) public view override returns (uint32) {
         uint32 nCheckpoints = numCheckpoints[account];
         if (nCheckpoints == 0) {
             return type(uint32).max;
@@ -174,9 +179,7 @@ contract VotingDelegationLib is IVotingDelegation {
         while (upper > lower) {
             uint32 center = upper - (upper - lower) / 2;
             Checkpoint storage cp = checkpoints[account][center];
-            if (cp.timestamp == timestamp) {
-                return center;
-            } else if (cp.timestamp < timestamp) {
+            if (cp.timestamp <= timestamp) {
                 lower = center;
             } else {
                 upper = center - 1;
@@ -193,5 +196,13 @@ contract VotingDelegationLib is IVotingDelegation {
 
     function getTokenIdsAt(address account, uint32 index) external view override returns (uint[] memory) {
         return checkpoints[account][index].tokenIds;
+    }
+
+    function getTokenIdsAtTimestamp(address account, uint timestamp) public view returns (uint[] memory) {
+        uint32 nCheckpoints = getPastVotesIndex(account, timestamp);
+        if (nCheckpoints == type(uint32).max) {
+            return new uint[](0);
+        }
+        return checkpoints[account][nCheckpoints].tokenIds;
     }
 }

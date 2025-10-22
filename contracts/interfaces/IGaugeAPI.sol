@@ -12,5 +12,4 @@ interface IGaugeAPI {
     function totalSupply() external view returns (uint);
     function earned(address account) external view returns (uint);
     function rewardForDuration() external view returns (uint256);
-    function maturityTime(address _account) external view returns (uint256);
 }
