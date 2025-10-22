@@ -6,7 +6,6 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import './AVM/interfaces/IAutoVotingEscrowManager.sol';
 import './interfaces/IBribe.sol';
 import './interfaces/IBribe.sol';
 import './interfaces/IBribeFactory.sol';
@@ -62,8 +61,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     mapping(address => bool) public isCLGauge;
     mapping(address => bool) public isAlive;                    // gauge    => boolean [is the gauge alive?]
     IGaugeManager.FarmingParam public farmingParam;
-
-    IAutoVotingEscrowManager public avm;
 
     bytes32 public constant COMMUNITY_FEE_WITHDRAWER_ROLE = keccak256('COMMUNITY_FEE_WITHDRAWER');
     bytes32 public constant COMMUNITY_FEE_VAULT_ADMINISTRATOR = keccak256('COMMUNITY_FEE_VAULT_ADMINISTRATOR');
@@ -537,7 +534,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     /// @notice claim bribes rewards given a TokenID
     function claimBribes(address[] memory _bribes, address[][] memory _tokens, uint256 _tokenId) external {
-        require(IVotingEscrow(_ve).isApprovedOrOwner(msg.sender, _tokenId) || (address(avm)!= address(0) && avm.getOriginalOwner(_tokenId) == msg.sender), "NAO");
+        require(IVotingEscrow(_ve).isApprovedOrOwner(msg.sender, _tokenId), "NAO");
         uint bribesLen = _bribes.length;
         for (uint256 i = 0; i < bribesLen; i++) {
             IBribe(_bribes[i]).getReward(_tokenId, _tokens[i]);
@@ -594,10 +591,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         require(_pairFactoryCL != pairFactoryCL, "NA");
         pairFactoryCL = _pairFactoryCL;
         emit SetPairFactoryCL(pairFactoryCL, _pairFactoryCL);
-    }
-    
-    function setAVM(address _avm) external GaugeAdmin {
-        avm = IAutoVotingEscrowManager(_avm);
     }
 
     function acceptAlgebraFeeChangeProposal (address _pool, uint16 newAlgebraFee) external GaugeAdmin {

@@ -9,7 +9,6 @@ import {IBlackHoleVotes} from "./interfaces/IBlackHoleVotes.sol";
 import {IVeArtProxy} from "./interfaces/IVeArtProxy.sol";
 import {IVotingEscrow} from "./interfaces/IVotingEscrow.sol";
 import {IVoter} from "./interfaces/IVoter.sol";
-import {IAutomatedVotingManager} from "./interfaces/IAutomatedVotingManager.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 import {IVotingDelegation} from "./interfaces/IVotingDelegation.sol";
 import {VotingBalanceLogic} from "./libraries/VotingBalanceLogic.sol";
@@ -79,7 +78,6 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     address public voter;
     address public team;
     address public artProxy;
-    address public avm;
     // address public burnTokenAddress=0x000000000000000000000000000000000000dEaD;
 
     uint public constant SMNFT_BONUS = 1000;
@@ -113,12 +111,11 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @notice Contract constructor
     /// @param token_addr `BLACK` token address
     /// @param voting_delegation Address of VotingDelegation contract
-    constructor(address token_addr, address art_proxy, address _avm, address voting_delegation) {
+    constructor(address token_addr, address art_proxy, address voting_delegation) {
         token = token_addr;
         voter = msg.sender;
         team = msg.sender;
         artProxy = art_proxy;
-        avm = _avm;
         votingDelegation = IVotingDelegation(voting_delegation);
         WEEK = BlackTimeLibrary.WEEK;
         MAXTIME = BlackTimeLibrary.MAX_LOCK_DURATION;
@@ -334,13 +331,6 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         _addTokenTo(_to, _tokenId);
         // Set the block of ownership transfer (for Flash NFT protection)
         ownership_change[_tokenId] = block.number;
-
-        if (_to == avm) { 
-            // dont need additional check on originalOwner mapping
-            // Store original owner before AVM takes control
-            // used a setter fucntion and exposed that through the method, any ohter better method 
-            IAutomatedVotingManager(avm).setOriginalOwner(_tokenId, _from);
-        } 
         // Log the transfer
         emit Transfer(_from, _to, _tokenId);
     }
@@ -1071,10 +1061,6 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         voter = _voter;
     }
 
-    function setAVM(address _avm) external {
-        require(msg.sender == team);
-        avm = _avm;
-    }
 
     function voting(uint _tokenId) external {
         require(msg.sender == voter);

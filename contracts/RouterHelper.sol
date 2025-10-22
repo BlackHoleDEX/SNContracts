@@ -182,17 +182,36 @@ contract RouterHelper is OwnableUpgradeable {
         }
     }
 
-    function _calculateStableSwapPrice(uint reserve0, uint reserve1, uint decimals0, uint decimals1) internal pure returns (uint) {
-        // Use stable swap price formula: Price(token0 in token1) = R₁(3R₀² + R₁²) / R₀(R₀² + 3R₁²)
-        // Normalize to 18 decimals
-        uint normR0 = decimals0 <= 18 ? reserve0 * 10**(18 - decimals0) : reserve0 / 10**(decimals0 - 18);
-        uint normR1 = decimals1 <= 18 ? reserve1 * 10**(18 - decimals1) : reserve1 / 10**(decimals1 - 18);
+    function _calculateStableSwapPrice(
+        uint x,
+        uint y,
+        uint decimals0,
+        uint decimals1
+    ) internal pure returns (uint) {
+        // Normalize reserves to 18 decimals
+        uint _x = (x * 1e18) / 10**decimals0;
+        uint _y = (y * 1e18) / 10**decimals1;
 
-        uint r0Sq = normR0 * normR0 / 1e18;
-        uint r1Sq = normR1 * normR1 / 1e18;
-        uint den = normR0 * (r0Sq + 3 * r1Sq);
-        return den != 0 ? normR1 * (3 * r0Sq + r1Sq) / den : 0;
+        if (_x == 0 || _y == 0) return 0;
+
+        // Precompute squared terms, scaled down
+        uint r0Sq = (_x * _x) / 1e18;
+        uint r1Sq = (_y * _y) / 1e18;
+
+        // Numerator and denominator coefficients (scaled terms)
+        uint numeratorCoeff = (3 * r0Sq + r1Sq);
+        uint denominatorCoeff = (r0Sq + 3 * r1Sq);
+
+        // Now compute numerator and denominator carefully, dividing early
+        uint numerator = (_y * numeratorCoeff) / 1e18;  // scaled down
+        uint denominator = (_x * denominatorCoeff) / 1e18;
+
+        if (denominator == 0) return 0;
+
+        // Final scale to 1e18 precision
+        return (numerator * 1e18) / denominator;
     }
+
 
     // performs chained getAmountOut calculations on any number of pairs
     function getAmountOut(uint amountIn, address tokenIn, address tokenOut) public view returns (uint amount, bool stable) {
