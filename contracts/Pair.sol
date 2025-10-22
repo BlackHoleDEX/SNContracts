@@ -362,7 +362,7 @@ contract Pair is IPair {
         _mint(to, liquidity);
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
-        emit Mint(msg.sender, _amount0, _amount1);
+        emit Mint(to, _amount0, _amount1);
     }
 
     // this low-level function should be called from a contract which performs important safety checks

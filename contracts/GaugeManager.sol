@@ -431,6 +431,12 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice distribute rewards for given gauges and rewards
     function distributeRewards(address[] memory _gauges, uint256[] memory _rewards) external nonReentrant GaugeAdmin {
         require(_gauges.length == _rewards.length, "Length mismatch");
+        // tranfer total rewards amount to this address
+        uint256 totalRewards = 0;
+        for (uint256 x = 0; x < _rewards.length; x++) {
+            totalRewards += _rewards[x];
+        }
+        IERC20Upgradeable(base).safeTransferFrom(msg.sender, address(this), totalRewards);
         for (uint256 x = 0; x < _gauges.length; x++) {
             if(!isCLGauge[_gauges[x]]) {
                 IGauge(_gauges[x]).notifyRewardAmount(base, _rewards[x]);

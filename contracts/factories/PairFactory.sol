@@ -3,6 +3,7 @@ pragma solidity 0.8.13;
 
 import '../interfaces/IPairFactory.sol';
 import '../interfaces/IPairGenerator.sol';
+import {MAX_FEE, MAX_REFERRAL_FEE_CAP} from '../libraries/Constants.sol';
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
@@ -12,8 +13,6 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
     uint256 public stableFee;
     uint256 public volatileFee;
     uint256 public MAX_REFERRAL_FEE; // 12%
-    uint256 public constant MAX_FEE = 500; // 5%
-    uint256 public constant MAX_REFERRAL_FEE_CAP = 2000; // 20% max referral fee
 
     address public feeManager;
     address public pendingFeeManager;

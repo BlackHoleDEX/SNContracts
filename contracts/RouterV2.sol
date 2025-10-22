@@ -303,17 +303,8 @@ contract RouterV2 is Ownable, ReentrancyGuard {
     ) external ensure(deadline) nonReentrant returns (uint amountA, uint amountB, uint liquidity) {
         (amountA, amountB) = _addLiquidity(tokenA, tokenB, stable, amountADesired, amountBDesired, amountAMin, amountBMin);
         address pair = pairFor(tokenA, tokenB, stable);
-
-        // Record total supply before token transfers for frontrunning protection
-        uint totalSupplyBefore = IERC20(pair).totalSupply();
-
         _safeTransferFrom(tokenA, msg.sender, pair, amountA);
         _safeTransferFrom(tokenB, msg.sender, pair, amountB);
-
-        // Verify total supply hasn't changed unexpectedly (frontrunning protection
-        uint totalSupplyAfter = IERC20(pair).totalSupply();
-        require(totalSupplyAfter == totalSupplyBefore, 'FLP'); // Frontrunning Liquidity Protection
-
         liquidity = IPair(pair).mint(to);
 
         // Additional check: ensure we received liquidity tokens
@@ -339,17 +330,9 @@ contract RouterV2 is Ownable, ReentrancyGuard {
             amountETHMin
         );
         address pair = pairFor(token, address(wETH), stable);
-
-        // Record total supply before token transfers for frontrunning protection
-        uint totalSupplyBefore = IERC20(pair).totalSupply();
-
         _safeTransferFrom(token, msg.sender, pair, amountToken);
         wETH.deposit{value: amountETH}();
         assert(wETH.transfer(pair, amountETH));
-
-        // Verify total supply hasn't changed unexpectedly (frontrunning protection)
-        uint totalSupplyAfter = IERC20(pair).totalSupply();
-        require(totalSupplyAfter == totalSupplyBefore, 'FLP'); // Frontrunning Liquidity Protection
 
         liquidity = IPair(pair).mint(to);
 
