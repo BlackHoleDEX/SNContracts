@@ -79,7 +79,7 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
     }
 
     function setReferralFee(uint256 _refFee) external onlyManager {
-        require(_refFee <= MAX_REFERRAL_FEE_CAP, "Referral fee exceeds maximum allowed");
+        require(_refFee <= MAX_REFERRAL_FEE_CAP, "RFE"); // Referral fee exceeds maximum allowed
         MAX_REFERRAL_FEE = _refFee;
     }
 
@@ -101,6 +101,7 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
     }
 
     function setCustomReferralFee(address _pairAddress, uint256 _refFee) external onlyManager {
+        require(_refFee <= MAX_REFERRAL_FEE_CAP, "RFE"); // Referral fee exceeds maximum allowed
         require(isPair[_pairAddress], "INVP");
         customReferralFees[_pairAddress] = _refFee;
     }

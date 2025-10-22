@@ -6,4 +6,5 @@ import "./IRouter.sol";
 interface IRouterHelper {
     function getAmountsOut(uint amountIn, IRouter.route[] memory routes) external returns (uint[] memory amounts, uint[] memory priceBeforeSwap, uint[] memory priceAfterSwap);
     function getAmountOut(uint amountIn, address tokenIn, address tokenOut) external view returns (uint amount, bool stable);
+    function getAmountOutForFeeOnTransfer(uint amountIn, address tokenIn, address tokenOut) external view returns (uint amount, bool stable);
 }

@@ -258,6 +258,51 @@ contract RouterHelper is OwnableUpgradeable {
         return (0, true);
     }
 
+    // performs chained getAmountOut calculations on any number of pairs
+    function getAmountOutForFeeOnTransfer(uint amountIn, address tokenIn, address tokenOut) public view returns (uint amount, bool stable) {
+        address pairStable = pairFor(tokenIn, tokenOut, true);
+        address pairVolatile = pairFor(tokenIn, tokenOut, false);
+        address pair;
+        uint amountStable;
+        uint amountVolatile;
+        uint amountOut;
+
+        if (IPairFactory(factory).isPair(pairStable)) {
+            // amountStable = IBaseV1Pair(pairStable).getAmountOut(amountIn, tokenIn);
+            
+            try IPair(pairStable).getAmountOut(amountIn, tokenIn) returns (uint outAmt) {
+                amountStable = outAmt;
+            } catch {
+                amountStable = 0;
+            }
+        }
+
+        if (IPairFactory(factory).isPair(pairVolatile)) {
+            //amountVolatile = IBaseV1Pair(pairVolatile).getAmountOut(amountIn, tokenIn);
+            
+            try IPair(pairVolatile).getAmountOut(amountIn, tokenIn) returns (uint outAmt) {
+                amountVolatile = outAmt;
+            } catch {
+                amountVolatile = 0;
+            }
+        }
+
+        (amountOut, stable, pair) = amountStable > amountVolatile ? (amountStable, true, pairStable) : (amountVolatile, false, pairVolatile);
+
+        if (pair == address(0)) {
+            return (0, true);
+        }
+
+        
+        (bool swapPossible,,) = _swapRatio(0, tokenIn, pair, amountOut);
+
+        if(swapPossible){
+            return (amountOut, stable);
+        }
+
+        return (0, true);
+    }
+
     // calculates the CREATE2 address for a pair without making any external calls
     function pairFor(address tokenA, address tokenB, bool stable) internal view returns (address pair) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
