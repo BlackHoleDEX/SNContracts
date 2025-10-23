@@ -173,7 +173,8 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice Recast the saved votes of a given TokenID
     function poke(uint256 _tokenId) external nonReentrant {
         uint256 _timestamp = block.timestamp;
-        if (BlackTimeLibrary.isLastHour(_timestamp)){
+        //if _timestamp is in last hour or first hour, consider it as distribution window and revert
+        if (_timestamp >= BlackTimeLibrary.epochVoteEnd(_timestamp) || _timestamp <= BlackTimeLibrary.epochVoteStart(_timestamp)) {
             revert("DW");
         }
         require(IVotingEscrow(_ve).isApprovedOrOwner(msg.sender, _tokenId) || msg.sender == _ve, "NAO||VE");
