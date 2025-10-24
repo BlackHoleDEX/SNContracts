@@ -155,7 +155,7 @@ contract RouterHelper is OwnableUpgradeable {
 
         uint actualAmountIn = amountIn + (pairSwapMetaData.balanceA - pairSwapMetaData.reserveA);
         uint feeAmount = actualAmountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000;
-        pairSwapMetaData.balanceA += amountIn - feeAmount;
+        pairSwapMetaData.balanceA = pairSwapMetaData.balanceA + amountIn - feeAmount;
         pairSwapMetaData.balanceB -= amountOut;
 
         uint afterReserveA = pairSwapMetaData.reserveA + actualAmountIn - feeAmount;

@@ -194,7 +194,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
 
         uint actualAmountIn = amountIn + (pairSwapMetaData.balanceA - pairSwapMetaData.reserveA);
         uint feeAmount = actualAmountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000;
-        pairSwapMetaData.balanceA += amountIn - feeAmount;
+        pairSwapMetaData.balanceA = pairSwapMetaData.balanceA + amountIn - feeAmount;
         pairSwapMetaData.balanceB -= amountOut;
 
         if(_k(pairSwapMetaData.balanceA, pairSwapMetaData.balanceB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable) >= _k(pairSwapMetaData.reserveA, pairSwapMetaData.reserveB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable)){
