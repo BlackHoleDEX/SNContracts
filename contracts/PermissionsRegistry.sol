@@ -2,7 +2,7 @@
 pragma solidity 0.8.13;
 
 /*
-    This contract handles the accesses to the various Black contracts.
+    This contract handles the accesses to the various Supernova contracts.
 */
 
 contract PermissionsRegistry {
@@ -10,7 +10,7 @@ contract PermissionsRegistry {
     /// @notice Control this contract. This is the main multisig
     address public blackMultisig;
 
-    /// @notice This is the black team multisig 
+    /// @notice This is the Supernova team multisig
     address public blackTeamMultisig;
 
     /// @notice Control emergency functions (set to multisig)
@@ -239,7 +239,7 @@ contract PermissionsRegistry {
     }
 
 
-    /// @notice set black team multisig
+    /// @notice set Supernova team multisig
     /// @param _new new address    
     function setBlackTeamMultisig(address _new) external {
         require(msg.sender == blackTeamMultisig, "not allowed");
@@ -250,7 +250,7 @@ contract PermissionsRegistry {
         emit SetBlackTeamMultisig(_new);
     }
 
-    /// @notice set black multisig
+    /// @notice set Supernova multisig
     /// @param _new new address    
     function setBlackMultisig(address _new) external {
         require(msg.sender == blackMultisig, "not allowed");

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Black Hole Foundation 2025
+// Supernova Foundation 2025
 
 pragma solidity 0.8.13;
 
 import {IERC20} from "./interfaces/IERC20.sol";
-import {IBlackClaims} from "./interfaces/IBlackClaims.sol";
+import {ISuperNovaClaims} from "./interfaces/ISuperNovaClaims.sol";
 import {IVotingEscrow} from "./interfaces/IVotingEscrow.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 
@@ -13,11 +13,11 @@ import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 /// @custom:modified-by Mitesh
 /// @dev Season rewards pulled from a treasury contract that must have a token allowance set for this contract.
 /// @notice Allows System Admins to set up and report scores for Seasons.
-contract BlackClaims is IBlackClaims {
+contract SuperNovaClaims is ISuperNovaClaims {
 
     uint256 public MAX_PERIOD;
 
-    ///@notice The address of the rewards token. (The BLACK token)
+    ///@notice The address of the rewards token. (The Supernova token)
     IERC20 immutable token;
 
     ///@notice The traeasury from which Seasons pull their reward tokens.
@@ -34,7 +34,7 @@ contract BlackClaims is IBlackClaims {
     IVotingEscrow public _ve;
 
     ///@notice A claim season period.
-    IBlackClaims.Season public season;
+    ISuperNovaClaims.Season public season;
 
     ///@notice A mapping of scores reported for each user by address.
     mapping(address => uint256) public season_rewards;
@@ -69,10 +69,10 @@ contract BlackClaims is IBlackClaims {
     ///@notice Initializes a new Season of the rewards program.
     ///@dev Only callable by Systems Admins. It is permissable to create Seasons with overlapping times.
     ///@param start_time_ The start time of the new season.
-    ///@return season_ IBlackClaims.Season The Season struct that was initialized.
+    ///@return season_ ISuperNovaClaims.Season The Season struct that was initialized.
     function startSeason(
         uint256 start_time_
-    ) external onlyOwner returns(IBlackClaims.Season memory season_)
+    ) external onlyOwner returns(ISuperNovaClaims.Season memory season_)
     {
         require(start_time_ > 0, "CANNOT START AT 0");
         require(season.start_time==0, "SEASON ALREADY STARTED");

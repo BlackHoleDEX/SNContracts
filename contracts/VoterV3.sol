@@ -282,14 +282,30 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         gaugeManager = IGaugeManager(_gaugeManager);
     }
 
+    /*
+    We are carry-forwarding votes as per our dex,
+    Hypothetically, if suppose the Network is down for more than a week, We are considering the previous week's voteweights for emission calculations.
+    */
+    function _getFinalEpochWithVotesForEpochFlip(uint256 epoch) internal view returns (uint256) {
+        uint finalEpoch = epoch;
+        uint tw = epochTotalWeight[finalEpoch];
+        for (uint i = 1; tw == 0 && i <= 10; i++) {
+            finalEpoch = epoch - (i * BlackTimeLibrary.WEEK);
+            tw = epochTotalWeight[finalEpoch];
+        }
+        return finalEpoch;
+    }
+
     /// @notice Get a pool's weight snapshot at a given epoch
     function getEpochPoolWeight(uint256 epoch, address pool) external view returns (uint256) {
-        return epochPoolWeight[epoch][pool];
+        uint finalEpoch = _getFinalEpochWithVotesForEpochFlip(epoch);
+        return epochPoolWeight[finalEpoch][pool];
     }
 
     /// @notice Get total weight snapshot at a given epoch
     function getEpochTotalWeight(uint256 epoch) external view returns (uint256) {
-        return epochTotalWeight[epoch];
+        uint finalEpoch = _getFinalEpochWithVotesForEpochFlip(epoch);
+        return  epochTotalWeight[finalEpoch];
     }
 
     function checkpointPoolWeightsForNextEpoch(address pool) external onlyGaugeManager {

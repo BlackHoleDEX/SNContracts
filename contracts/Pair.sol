@@ -8,6 +8,7 @@ import './interfaces/IPairGenerator.sol';
 import './interfaces/IPairCallee.sol';
 import './interfaces/IPairFactory.sol';
 import './PairFees.sol';
+import {REFERRAL_FEE_DENOMINATOR} from './libraries/Constants.sol';
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
@@ -160,7 +161,7 @@ contract Pair is IPair {
         // get referral fee
         address _dibs = IPairFactory(factory).dibs();
         uint256 _maxRef = IPairFactory(factory).getReferralFee(address(this));
-        uint256 _referralFee = (_dibs != address(0)) ? (amount * _maxRef / 10000) : 0;
+        uint256 _referralFee = (_dibs != address(0)) ? (amount * _maxRef / REFERRAL_FEE_DENOMINATOR) : 0;
         if (_referralFee > 0) {
             _safeTransfer(token0, _dibs, _referralFee); // Transfer referral fees
             amount -= _referralFee;
@@ -178,9 +179,9 @@ contract Pair is IPair {
         // get referral fee
         address _dibs = IPairFactory(factory).dibs();
         uint256 _maxRef = IPairFactory(factory).getReferralFee(address(this));
-        uint256 _referralFee = (_dibs != address(0)) ? (amount * _maxRef / 10000) : 0;
+        uint256 _referralFee = (_dibs != address(0)) ? (amount * _maxRef / REFERRAL_FEE_DENOMINATOR) : 0;
          if (_referralFee > 0) {
-             _safeTransfer(token1, _dibs, _referralFee); // transfer the fees out to PairFees
+             _safeTransfer(token1, _dibs, _referralFee); // transfer the fees out to Dibs address(Foundation address)
             amount -= _referralFee;
          }
         _safeTransfer(token1, fees, amount); // transfer the fees out to PairFees
@@ -542,7 +543,7 @@ contract Pair is IPair {
             )
         );
         address recoveredAddress = ECDSA.recover(digest, v, r, s);
-        require(recoveredAddress != address(0) && recoveredAddress == owner, 'ISIG');
+        require(recoveredAddress == owner, 'ISIG');
         allowance[owner][spender] = value;
 
         emit Approval(owner, spender, value);

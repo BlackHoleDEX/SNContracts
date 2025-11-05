@@ -22,6 +22,7 @@ import '@cryptoalgebra/integral-core/contracts/interfaces/IERC20Minimal.sol';
 import '../interfaces/IBribe.sol';
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 import {IncentiveId} from '@cryptoalgebra/integral-farming/contracts/libraries/IncentiveId.sol';
+import {REFERRAL_FEE_DENOMINATOR} from '../libraries/Constants.sol';
 
 contract GaugeCL is ReentrancyGuard, Ownable {
 
@@ -51,7 +52,6 @@ contract GaugeCL is ReentrancyGuard, Ownable {
     bool public emergency;
     address immutable factory;
     uint16 private constant ALGEBRA_FEE_DENOMINATOR = 1000;
-    uint16 private constant REFERRAL_FEE_DENOMINATOR = 1000;
 
     event RewardAdded(uint256 reward);
     event Deposit(address indexed user, uint256 amount);

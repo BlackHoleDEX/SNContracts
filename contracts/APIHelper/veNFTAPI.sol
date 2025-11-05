@@ -14,8 +14,6 @@ import '../interfaces/IRewardsDistributor.sol';
 import '../interfaces/IGaugeFactory.sol';
 import '../interfaces/IGaugeFactoryCL.sol';
 
-
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 
 import "hardhat/console.sol";
@@ -36,7 +34,7 @@ interface IPairAPI {
     function pair_factory() external view returns(address);
 }
 
-contract veNFTAPI is Initializable {
+contract veNFTAPI {
 
     struct LockInfo {
         address owner;
@@ -136,9 +134,8 @@ contract veNFTAPI is Initializable {
     struct AllPairRewards {
         Reward[] rewards;
     }
-    constructor() {}
 
-    function initialize(address _voter, address _rewarddistro, address _gaugeFactory, address _gaugeFactoryCL, address _gaugeManager) initializer public {
+    constructor(address _voter, address _rewarddistro, address _gaugeFactory, address _gaugeFactoryCL, address _gaugeManager) {
         owner = msg.sender;
         voter = IVoter(_voter);
         rewardDisitributor = IRewardsDistributor(_rewarddistro);
@@ -260,45 +257,45 @@ contract veNFTAPI is Initializable {
     //     }
     // }
 
-    function getAllPairRewards(address _user, uint _amounts, uint _offset) external view returns(uint totNFTs, bool hasNext, LockReward[] memory _lockReward){
+    function getAllPairRewards(address _user, uint _lockBatchSize, uint _lockOffset, uint _gaugeBatchSize, uint _gaugeOffset) external view returns(LockReward[] memory _lockReward){
 
         if(_user == address(0)){
 
-            return (totNFTs, hasNext, _lockReward);
+            return (_lockReward);
         }
+        uint startLockIndex = _lockOffset;
+        uint endLockIndex = _lockOffset + _lockBatchSize;
+        uint totNFTs = ve.balanceOf(_user);
+        endLockIndex = (endLockIndex < totNFTs) ? endLockIndex : totNFTs;
 
-        totNFTs = ve.balanceOf(_user);
+        _lockReward = new LockReward[](endLockIndex - startLockIndex);
 
-        uint length = _amounts < totNFTs ? _amounts : totNFTs;
-        _lockReward = new LockReward[](length);
-
-        uint i = _offset;
         uint256 nftId;
-        hasNext = true;
 
-        for(i; i < _offset + _amounts; i++){ // need to be amounts right
-            if(i >= totNFTs) {
-                hasNext = false;
-                break;
-            }
-            nftId = ve.tokenOfOwnerByIndex(_user, i);
-
-            _lockReward[i-_offset].id = nftId;
-            _lockReward[i-_offset].lockedAmount = uint128(ve.locked(nftId).amount);
-            _lockReward[i-_offset].pairRewards = _getRewardsForNft(nftId);
+        for(uint i = startLockIndex; i < endLockIndex; i++){ // need to be amounts right
+            nftId = ve.tokenOfOwnerByIndex(_user, i);   
+            _lockReward[i-startLockIndex].id = nftId;
+            _lockReward[i-startLockIndex].lockedAmount = uint128(ve.locked(nftId).amount);
+            (_lockReward[i-startLockIndex].pairRewards) = _getRewardsForNft(nftId, _gaugeBatchSize, _gaugeOffset);
         }
     }
-
-    function _getRewardsForNft(uint nftId) internal view returns (PairReward[] memory pairReward) {
+    function _getRewardsForNft(uint nftId, uint _gaugeBatchSize, uint _gaugeOffset) internal view returns (PairReward[] memory pairReward) {
         uint basicPoolGaugeLength = gaugeFactory.length();
         uint clPoolGaugeLength = gaugeFactoryCL.length();
+        
+        // Calculate the actual range to process
+        uint startIdx = _gaugeOffset;
+        uint endIdx = _gaugeOffset + _gaugeBatchSize;
+        
+        // Check if there are more gauges beyond this batch and cap endIdx
+        endIdx = (endIdx < basicPoolGaugeLength + clPoolGaugeLength) ? endIdx : (basicPoolGaugeLength + clPoolGaugeLength);
         uint maxPairRewardCount = 0;
-        PairReward[] memory _pairRewards = new PairReward[](basicPoolGaugeLength + clPoolGaugeLength);
+        PairReward[] memory _pairRewards = new PairReward[](endIdx - startIdx);
         Reward[] memory _rewardData;
         bool hasReward;
         address poolAddress;
 
-        for(uint i=0; i<basicPoolGaugeLength + clPoolGaugeLength; i++){
+        for(uint i = startIdx; i < endIdx; i++){
             if(i >= basicPoolGaugeLength){
                 poolAddress = IGaugeManager(gaugeManager).poolForGauge(gaugeFactoryCL.gauges(i-basicPoolGaugeLength));
                 (_rewardData, hasReward) = _pairReward(poolAddress, nftId, gaugeFactoryCL.gauges(i-basicPoolGaugeLength));

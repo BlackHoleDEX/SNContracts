@@ -5,7 +5,7 @@ pragma solidity 0.8.13;
 
 /// @title Interface for protocol's seasonal player rewards program
 /// @author Chance Santana-Wees (Coelacanth/Coel.eth)
-interface IBlackClaims {
+interface ISuperNovaClaims {
     struct Season {
         uint256 start_time;
         uint256 reward_amount;

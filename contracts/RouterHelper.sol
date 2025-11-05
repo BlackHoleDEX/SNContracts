@@ -134,7 +134,11 @@ contract RouterHelper is OwnableUpgradeable {
                         priceAfterSwap[i+1] = 0;
                         break;
                     }
-                } 
+                } else {
+                    amounts[i+1] = 0;
+                    priceAfterSwap[i+1] = 0;
+                    break;
+                }
             }
         }
     }
@@ -153,9 +157,9 @@ contract RouterHelper is OwnableUpgradeable {
         (pairSwapMetaData.reserveA, pairSwapMetaData.reserveB) = tokenIn == pairSwapMetaData.token0 ? (pairSwapMetaData.reserve0, pairSwapMetaData.reserve1) : (pairSwapMetaData.reserve1, pairSwapMetaData.reserve0);
         (pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB) = tokenIn == pairSwapMetaData.token0 ? (pairSwapMetaData.decimals0, pairSwapMetaData.decimals1) : (pairSwapMetaData.decimals1, pairSwapMetaData.decimals0);
 
-        uint actualAmountIn = amountIn + (pairSwapMetaData.balanceA - pairSwapMetaData.reserveA);
+        uint actualAmountIn = amountIn + pairSwapMetaData.balanceA - pairSwapMetaData.reserveA;
         uint feeAmount = actualAmountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000;
-        pairSwapMetaData.balanceA += amountIn - feeAmount;
+        pairSwapMetaData.balanceA = pairSwapMetaData.balanceA + amountIn - feeAmount;
         pairSwapMetaData.balanceB -= amountOut;
 
         uint afterReserveA = pairSwapMetaData.reserveA + actualAmountIn - feeAmount;

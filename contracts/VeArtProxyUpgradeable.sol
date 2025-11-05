@@ -46,7 +46,7 @@ contract VeArtProxyUpgradeable is IVeArtProxy, OwnableUpgradeable {
         output = string(abi.encodePacked(output, "isSMNFT ", isSMNFT?"true":"false", '</text><text x="10" y="100" class="base">'));
         output = string(abi.encodePacked(output, "value ", toString(_value), '</text></svg>'));
 
-        string memory json = Base64.encode(bytes(string(abi.encodePacked('{"name": "lock #', toString(_tokenId), '", "description": "Black locks, can be used to boost gauge yields, vote on token emission, and receive bribes", "image": "data:image/svg+xml;base64,', Base64.encode(bytes(output)), '"}'))));
+        string memory json = Base64.encode(bytes(string(abi.encodePacked('{"name": "lock #', toString(_tokenId), '", "description": "Supernova locks, can be used to boost gauge yields, vote on token emission, and receive bribes", "image": "data:image/svg+xml;base64,', Base64.encode(bytes(output)), '"}'))));
         output = string(abi.encodePacked('data:application/json;base64,', json));
     }
 }

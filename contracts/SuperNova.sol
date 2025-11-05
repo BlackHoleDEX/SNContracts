@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity 0.8.13;
 
-import "./interfaces/IBlack.sol";
+import "./interfaces/ISuperNova.sol";
 
-contract Black is IBlack {
+contract SuperNova is ISuperNova {
 
     string public constant name = "SUPERNOVA";
     string public constant symbol = "SNOVA";

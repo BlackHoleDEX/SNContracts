@@ -24,8 +24,8 @@ contract GaugeV2 is ReentrancyGuard, Ownable {
 
     address public VE;
     address public DISTRIBUTION;
-    address public internal_bribe;
-    address public external_bribe;
+    address public immutable internal_bribe;
+    address public immutable external_bribe;
 
     uint256 public DURATION;
     uint256 internal _periodFinish;

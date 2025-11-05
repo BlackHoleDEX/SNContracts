@@ -71,9 +71,11 @@ contract Bribe is ReentrancyGuard {
         TYPE = _type;
 
         bribeTokens.push(_token0);
-        bribeTokens.push(_token1);
         isBribeToken[_token0] = true;
-        isBribeToken[_token1] = true;
+        if(_token1 != _token0) { // for single token gauges
+            bribeTokens.push(_token1);
+            isBribeToken[_token1] = true;
+        }
     }
 
     /// @notice get next epoch (where bribes are saved)

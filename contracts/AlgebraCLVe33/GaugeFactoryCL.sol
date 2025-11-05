@@ -15,6 +15,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
+import {MAX_REFERRAL_FEE_CAP} from '../libraries/Constants.sol';
 
 
 interface IGaugeCL {
@@ -29,7 +30,6 @@ interface ICustomPoolDeployer {
 contract GaugeFactoryCL is IGaugeFactoryCL, OwnableUpgradeable {
 
     using SafeERC20 for IERC20;
-    uint256 public constant MAX_REFERRAL_FEE = 50; // Max 5% (10000 basis points)
     address public last_gauge;
     address public permissionsRegistry;
     address public algebraPoolAPIStorage;
@@ -135,7 +135,7 @@ contract GaugeFactoryCL is IGaugeFactoryCL, OwnableUpgradeable {
     }
 
     function setReferralFee(uint256 _dibsFee) external onlyAllowed {
-        require(_dibsFee <= MAX_REFERRAL_FEE, "HFE");
+        require(_dibsFee <= MAX_REFERRAL_FEE_CAP, "HFE");
         dibsPercentage = _dibsFee;
     }
 

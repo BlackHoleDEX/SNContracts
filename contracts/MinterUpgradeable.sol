@@ -4,7 +4,7 @@ pragma solidity 0.8.13;
 import "./libraries/Math.sol";
 import "./interfaces/IMinter.sol";
 import "./interfaces/IRewardsDistributor.sol";
-import "./interfaces/IBlack.sol";
+import "./interfaces/ISuperNova.sol";
 import "./interfaces/IGaugeManager.sol";
 import "./interfaces/IVotingEscrow.sol";
 
@@ -34,7 +34,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     uint256 public constant PROPOSAL_DECREASE = 9_900; // 1% increment after the 67th epoch based on proposal
 
     uint public WEEK; // allows minting once per week (reset every Thursday 00:00 UTC)
-    uint public weekly; // represents a starting weekly emission of 2.6M BLACK (BLACK has 18 decimals)
+    uint public weekly; // represents a starting weekly emission of 2.6M Supernova (Supernova has 18 decimals)
     uint public active_period;
     uint public LOCK;
     uint256 public epochCount;
@@ -43,7 +43,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     address public team;
     address public pendingTeam;
     
-    IBlack public _black;
+    ISuperNova public _black;
     IGaugeManager public _gaugeManager;
     IVotingEscrow public _ve;
     IRewardsDistributor public _rewards_distributor;
@@ -52,6 +52,8 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     mapping(uint256 => bool) public proposals;
 
     event Mint(address indexed sender, uint weekly, uint circulating_supply, uint circulating_emission);
+    event UpdateTeam(address indexed newTeam);
+    event AcceptNewTeam(address indexed newTeam);
 
     constructor() {}
 
@@ -68,13 +70,13 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         teamRate = 500; // 500 bps = 5%
         WEEK = BlackTimeLibrary.WEEK;
         LOCK = BlackTimeLibrary.MAX_LOCK_DURATION;
-        _black = IBlack(IVotingEscrow(__ve).token());
+        _black = ISuperNova(IVotingEscrow(__ve).token());
         _gaugeManager = IGaugeManager(__gaugeManager);
         _ve = IVotingEscrow(__ve);
         _rewards_distributor = IRewardsDistributor(__rewards_distributor);
 
         active_period = ((block.timestamp + (2 * WEEK)) / WEEK) * WEEK;
-        weekly = 10_000_000 * 1e18; // represents a starting weekly emission of 10M BLACK (BLACK has 18 decimals)
+        weekly = 10_000_000 * 1e18; // represents a starting weekly emission of 10M Supernova (Supernova has 18 decimals)
         isFirstMint = true;
 
         burnTokenAddress=0x000000000000000000000000000000000000dEaD;
@@ -101,11 +103,13 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     function setTeam(address _team) external {
         require(msg.sender == team);
         pendingTeam = _team;
+        emit UpdateTeam(_team);
     }
 
     function acceptTeam() external {
         require(msg.sender == pendingTeam, "not pending team");
         team = pendingTeam;
+        emit AcceptNewTeam(team);
     }
 
     function setGaugeManager(address __gaugeManager) external {

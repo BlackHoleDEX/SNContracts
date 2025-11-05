@@ -194,7 +194,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
 
         uint actualAmountIn = amountIn + (pairSwapMetaData.balanceA - pairSwapMetaData.reserveA);
         uint feeAmount = actualAmountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000;
-        pairSwapMetaData.balanceA += amountIn - feeAmount;
+        pairSwapMetaData.balanceA = pairSwapMetaData.balanceA + amountIn - feeAmount;
         pairSwapMetaData.balanceB -= amountOut;
 
         if(_k(pairSwapMetaData.balanceA, pairSwapMetaData.balanceB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable) >= _k(pairSwapMetaData.reserveA, pairSwapMetaData.reserveB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable)){
@@ -333,7 +333,6 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         _safeTransferFrom(token, msg.sender, pair, amountToken);
         wETH.deposit{value: amountETH}();
         assert(wETH.transfer(pair, amountETH));
-
         liquidity = IPair(pair).mint(to);
 
         // Additional check: ensure we received liquidity tokens
@@ -704,6 +703,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
             emit Swap(msg.sender,amountInput,amountOutput,input,_to,_stable);  
         }
     }
+
     function swapExactTokensForTokensSupportingFeeOnTransferTokens(
         uint amountIn,
         uint amountOutMin,
@@ -725,6 +725,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
             'IOA'
         );
     }
+
     function swapExactETHForTokensSupportingFeeOnTransferTokens(
         uint amountOutMin,
         IRouter.route[] calldata routes,

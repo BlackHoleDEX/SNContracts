@@ -7,7 +7,6 @@ import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.
 import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import './interfaces/IBribe.sol';
-import './interfaces/IBribe.sol';
 import './interfaces/IBribeFactory.sol';
 import './interfaces/IERC20.sol';
 import './interfaces/IGauge.sol';
@@ -22,7 +21,6 @@ import './interfaces/IPermissionsRegistry.sol';
 import './interfaces/ITokenHandler.sol';
 import './interfaces/IVoter.sol';
 import './interfaces/IVotingEscrow.sol';
-import './libraries/Math.sol';
 import '@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol';
 import '@cryptoalgebra/integral-core/contracts/interfaces/vault/IAlgebraCommunityVault.sol';
 import '@cryptoalgebra/integral-farming/contracts/base/IncentiveKey.sol';
@@ -198,8 +196,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         address tokenA = address(0);
         address tokenB = address(0);
-        (tokenA) = IPairInfo(_pool).token0();
-        (tokenB) = IPairInfo(_pool).token1();
 
         // for future implementation add isPair() in factory
         if(_gaugeType == 0){
@@ -211,22 +207,29 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             */
             address customDeployer = IAlgebraPoolAPIStorage(algebraPoolAPIStorage).pairToDeployer(_pool);
             if ((customDeployer != address(0))) {
+                (tokenA) = IPairInfo(_pool).token0();
+                (tokenB) = IPairInfo(_pool).token1();
                 address _poolAddress = IAlgebraCLFactory(pairFactoryCL).customPoolByPair(customDeployer, tokenA, tokenB);
                 isPair = (_poolAddress == _pool);
             }
         }
 
-        require(ITokenHandler(tokenHandler).isWhitelisted(tokenA) && ITokenHandler(tokenHandler).isWhitelisted(tokenB), "!WHITELISTED");
-        require(ITokenHandler(tokenHandler).isConnector(tokenA) || ITokenHandler(tokenHandler).isConnector(tokenB), "!CONNECTOR");
+        if (isPair) {
+            (tokenA) = IPairInfo(_pool).token0();
+            (tokenB) = IPairInfo(_pool).token1();
+            require(ITokenHandler(tokenHandler).isWhitelisted(tokenA) && ITokenHandler(tokenHandler).isWhitelisted(tokenB), "!WHITELISTED");
+            require(ITokenHandler(tokenHandler).isConnector(tokenA) || ITokenHandler(tokenHandler).isConnector(tokenB), "!CONNECTOR");
+        } 
         // If not a recognized pair/pool, only GaugeAdmin may proceed
-        if (!isPair) {
+        else {
             require(IPermissionsRegistry(permissionRegistry).hasRole("GAUGE_ADMIN",msg.sender), 'GAUGE_ADMIN');
+            require(ITokenHandler(tokenHandler).isWhitelisted(_pool), "!WHITELISTED");
+            _gaugeType = 0;
         }
-        require(tokenA != address(0) && tokenB != address(0), "!TOKENS");
 
-        (_internal_bribe, _external_bribe) = _deployBribes(_pool, tokenA, tokenB, _gaugeType);
+        (_internal_bribe, _external_bribe) = _deployBribes(_pool, isPair? tokenA: _pool, isPair? tokenB: _pool, _gaugeType);
         // create basic pair gauge when gaugeType is 0 or not a recognized pair (To allow single token gauges)
-        if(_gaugeType == 0 || !isPair) {
+        if(_gaugeType == 0) {
             _gauge = IGaugeFactory(gaugeFactory).createGauge(base, _ve, _pool, address(this), _internal_bribe, _external_bribe, isPair);
         }
         if(_gaugeType == 1) {
@@ -266,13 +269,13 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         string memory _internalType;
         string memory _extrenalType;
         if(_gaugeType == 0) {
-            _internalType =  string.concat("Black LP Fees: ", IERC20(_pool).symbol() );
-            _extrenalType = string.concat("Black Bribes: ", IERC20(_pool).symbol() );
+            _internalType =  string.concat("Supernova LP Fees: ", IERC20(_pool).symbol() );
+            _extrenalType = string.concat("Supernova Bribes: ", IERC20(_pool).symbol() );
         }
         if(_gaugeType == 1) {
             string memory poolStr = addressToString(_pool);
-            _internalType = string.concat("Black LP Fees: ", poolStr);
-            _extrenalType = string.concat("Black Bribes: ", poolStr);
+            _internalType = string.concat("Supernova LP Fees: ", poolStr);
+            _extrenalType = string.concat("Supernova Bribes: ", poolStr);
         }
         
         _internal_bribe = IBribeFactory(bribefactory).createBribe(_owner, tokenA, tokenB, _internalType);
@@ -333,15 +336,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
     }
 
-    function distributeFees() external nonReentrant GaugeAdmin {
-        uint256 i = 0;
-        uint256 poolsLength = pools.length;
-        for (i; i < poolsLength; i++) {
-            address _pool = pools[i];
-            _distributeFees(_pool);
-        }
-    }
-
    function distributeFees(uint256 _start, uint256 _finish) external nonReentrant EpochManagerOrGaugeAdmin {
         for (uint256 x = _start; x < _finish; x++) {
             address _pool = pools[x];
@@ -373,32 +367,12 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             }
         }
     }
-    
-    /// @notice Distribute the emission for ALL gauges 
-    function distributeAll() external nonReentrant GaugeAdmin {
-        
-        IMinter(minter).update_period();
 
-        uint256 x = 0;
-        uint256 stop = pools.length;
-        for (x; x < stop; x++) {
-            _distribute(gauges[pools[x]]);
-        }
-    }
 
     function distribute(uint256 _start, uint256 _finish) external nonReentrant EpochManagerOrGaugeAdmin {
         IMinter(minter).update_period();
         for (uint256 x = _start; x < _finish; x++) {
             _distribute(gauges[pools[x]]);
-        }
-    }
-
-    /// @notice distribute reward onyl for given gauges
-    /// @dev    this function is used in case some distribution fails
-    function distribute(address[] memory _gauges) external nonReentrant GaugeAdmin {
-        IMinter(minter).update_period();
-        for (uint256 x = 0; x < _gauges.length; x++) {
-            _distribute(_gauges[x]);
         }
     }
 
@@ -436,7 +410,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         for (uint256 x = 0; x < _rewards.length; x++) {
             totalRewards += _rewards[x];
         }
-        IERC20Upgradeable(base).safeTransferFrom(msg.sender, address(this), totalRewards);
+        IERC20Upgradeable(base).safeTransferFrom(msg.sender, address(this), totalRewards);        
         for (uint256 x = 0; x < _gauges.length; x++) {
             if(!isCLGauge[_gauges[x]]) {
                 IGauge(_gauges[x]).notifyRewardAmount(base, _rewards[x]);
@@ -602,10 +576,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function acceptAlgebraFeeChangeProposal (address _pool, uint16 newAlgebraFee) external GaugeAdmin {
         address communityVault = IAlgebraPool(_pool).communityVault();
         IAlgebraCommunityVault(communityVault).acceptAlgebraFeeChangeProposal(newAlgebraFee);
-    }
-
-    function version() external view returns (string memory version) {
-        version  = "GaugeManager v1.0.0";
     }
 
     function length() external view returns(uint) {
