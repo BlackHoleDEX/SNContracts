@@ -38,6 +38,10 @@ contract CustomPoolDeployer is Initializable, OwnableUpgradeable {
 
     mapping(address => bool) public authorizedAccounts;
 
+    // Calculated as: BEFORE_POSITION_MODIFY_FLAG(4) | AFTER_INIT_FLAG(64) | BEFORE_SWAP_FLAG(1) | AFTER_SWAP_FLAG(2) | BEFORE_FLASH_FLAG(16)
+    // Using numeric values since library references are not compile-time constants
+    uint8 public constant defaultPluginConfig = 87; // 87 in decimal (sum of all 5 flags)
+
     modifier onlyAuthorized() {
         require(
             authorizedAccounts[msg.sender] || msg.sender == owner(),
@@ -129,6 +133,10 @@ contract CustomPoolDeployer is Initializable, OwnableUpgradeable {
             newPluginAddress
         );
         IVolatilityOracle(newPluginAddress).initialize();
+        IAlgebraCustomPoolEntryPoint(entryPoint).setPluginConfig(
+            customPool,
+            defaultPluginConfig
+        );
         emit CustomPoolCreated(creator, tokenA, tokenB, customPool, newPluginAddress);
     }
 
