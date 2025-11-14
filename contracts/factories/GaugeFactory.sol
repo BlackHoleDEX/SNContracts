@@ -5,14 +5,7 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import '../interfaces/IPermissionsRegistry.sol';
 import '../interfaces/IGaugeFactory.sol';
 import '../GaugeV2.sol';
-
-interface IGauge{
-    function setDistribution(address _distro) external;
-    function activateEmergencyMode() external;
-    function stopEmergencyMode() external;
-    function setRewarderPid(uint256 pid) external;
-    function setFeeVault(address _feeVault) external;
-}
+import '../interfaces/IGauge.sol';
 
 contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
     address public last_gauge;
@@ -21,6 +14,13 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
     address[] internal __gauges;
     address public gaugeManager;
 
+    event SetRegistry(address indexed old, address indexed latest);
+    event SetGaugeManager(address indexed old, address indexed latest);
+    event GaugeCreated(address indexed gauge, address internal_bribe, address external_bribe, address indexed pool, bool indexed isPair);
+    event SetDistribution(address indexed gauge, address indexed distro);
+    event EmergencyActivated(address indexed gauge);
+    event EmergencyDeactivated(address indexed gauge);
+
     constructor() {}
 
     function initialize(address _permissionRegistry) initializer  public {
@@ -28,8 +28,8 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
         permissionsRegistry = _permissionRegistry;
     }
 
-    function setRegistry(address _registry) external {
-        require(owner() == msg.sender, 'NA');
+    function setRegistry(address _registry) external onlyOwner {
+        emit SetRegistry(permissionsRegistry, _registry);
         permissionsRegistry = _registry;
     }
 
@@ -43,6 +43,7 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
 
     function createGauge(address _rewardToken,address _ve,address _token,address _distribution, address _internal_bribe, address _external_bribe, bool _isPair) external onlyGaugeManager returns (address) {
         last_gauge = address(new GaugeV2(_rewardToken,_ve,_token,_distribution,_internal_bribe,_external_bribe,_isPair) );
+        emit GaugeCreated(last_gauge, _internal_bribe, _external_bribe, _token, _isPair);
         __gauges.push(last_gauge);
         return last_gauge;
     }
@@ -61,6 +62,7 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
         uint i = 0;
         for ( i ; i < _gauges.length; i++){
             IGauge(_gauges[i]).activateEmergencyMode();
+            emit EmergencyActivated(_gauges[i]);
         }
     }
 
@@ -68,6 +70,7 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
         uint i = 0;
         for ( i ; i < _gauges.length; i++){
             IGauge(_gauges[i]).stopEmergencyMode();
+            emit EmergencyDeactivated(_gauges[i]);
         }
     }
 
@@ -75,6 +78,7 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
         uint i = 0;
         for ( i ; i < _gauges.length; i++){
             IGauge(_gauges[i]).setDistribution(distro);
+            emit SetDistribution(_gauges[i], distro);
         }
     }
 
@@ -85,6 +89,7 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
 
     function setGaugeManager(address _gaugeManager) external onlyAllowed {
         require(_gaugeManager != address(0), "ZA");
+        emit SetGaugeManager(gaugeManager, _gaugeManager);
         gaugeManager = _gaugeManager;
     }
 }

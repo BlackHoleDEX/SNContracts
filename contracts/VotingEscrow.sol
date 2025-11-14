@@ -17,8 +17,7 @@ import {VotingBalanceLogic} from "./libraries/VotingBalanceLogic.sol";
 /// @notice Votes have a weight depending on time, so that users are committed to the future of (whatever they are voting for)
 /// @author Modified from Solidly (https://github.com/solidlyexchange/solidly/blob/master/contracts/ve.sol)
 /// @author Modified from Curve (https://github.com/curvefi/curve-dao-contracts/blob/master/contracts/VotingEscrow.vy)
-/// @author Modified from Nouns DAO (https://github.com/withtally/my-nft-dao-project/blob/main/contracts/ERC721Checkpointable.sol)
-/// @dev Vote weight decays linearly over time. Lock time cannot be more than `MAXTIME` (2 years).
+/// @dev Vote weight decays linearly over time. Lock time cannot be more than `MAXTIME` (4 years).
 contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     enum DepositType {
         DEPOSIT_FOR_TYPE,
@@ -33,11 +32,10 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
 
     event Deposit(
         address indexed provider,
-        uint tokenId,
+        uint indexed tokenId,
         uint value,
-        uint indexed locktime,
-        DepositType deposit_type,
-        uint ts
+        uint unlocktime,
+        DepositType deposit_type
     );
 
     event Merge(
@@ -47,8 +45,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         uint256 _amountFrom,
         uint256 _amountTo,
         uint256 _amountFinal,
-        uint256 _locktime,
-        uint256 _ts
+        uint256 unlocktime
     );
     event Split(
         uint256 indexed _from,
@@ -57,17 +54,18 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         address _sender,
         uint256 _splitAmount1,
         uint256 _splitAmount2,
-        uint256 _locktime,
-        uint256 _ts
+        uint256 _unlocktime
     );
     
-    event MetadataUpdate(uint256 _tokenId);
+    event MetadataUpdate(uint256 indexed _tokenId);
     event BatchMetadataUpdate(uint256 _fromTokenId, uint256 _toTokenId);
 
-    event Withdraw(address indexed provider, uint tokenId, uint value, uint ts);
-    event LockPermanent(address indexed _owner, uint256 indexed _tokenId, uint256 amount, uint256 _ts);
-    event UnlockPermanent(address indexed _owner, uint256 indexed _tokenId, uint256 amount, uint256 _ts);
+    event Withdraw(address indexed provider, uint tokenId, uint value);
+    event LockPermanent(address indexed _owner, uint256 indexed _tokenId, uint256 amount);
+    event UnlockPermanent(address indexed _owner, uint256 indexed _tokenId, uint256 amount);
     event Supply(uint prevSupply, uint supply);
+    event Checkpoint();
+    event UpdateToSMNFT(uint256 indexed _tokenId, int128 _amount, uint256 _unlockAt, bool isPermanent, bool isSMNFT);
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -80,7 +78,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     // address public burnTokenAddress=0x000000000000000000000000000000000000dEaD;
 
     uint public constant SMNFT_BONUS = 1000;
-    uint public PRECISISON = 10000;
+    uint public constant PRECISION = 10000;
 
     /// @dev Mapping of interface id to bool about whether or not it's supported
     mapping(bytes4 => bool) internal supportedInterfaces;
@@ -97,11 +95,11 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @dev Current count of token
     uint internal tokenId;
 
-    uint internal WEEK;
+    uint internal immutable WEEK;
 
-    uint internal MAXTIME;
-    int128 internal iMAXTIME;
-    ISuperNova public _black;
+    uint internal immutable MAXTIME;
+    int128 internal immutable iMAXTIME;
+    ISuperNova public immutable _black;
 
 
     VotingBalanceLogic.Data private votingBalanceLogicData;
@@ -110,9 +108,9 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @param token_addr `Supernova` token address
     constructor(address token_addr, address art_proxy) {
         token = token_addr;
-        voter = msg.sender;
         team = msg.sender;
         artProxy = art_proxy;
+
         WEEK = BlackTimeLibrary.WEEK;
         MAXTIME = BlackTimeLibrary.MAX_LOCK_DURATION;
         iMAXTIME = int128(int256(BlackTimeLibrary.MAX_LOCK_DURATION));
@@ -197,16 +195,14 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     }
 
     /// @dev Returns the number of NFTs owned by `_owner`.
-    ///      Throws if `_owner` is the zero address. NFTs assigned p to the zero address are considered invalid.
     /// @param _owner Address for whom to query the balance.
     function _balance(address _owner) internal view returns (uint) {
         return ownerToNFTokenCount[_owner];
     }
 
     /// @dev Returns the number of NFTs owned by `_owner`.
-    ///      Throws if `_owner` is the zero address. NFTs assigned to the zero address are considered invalid.
     /// @param _owner Address for whom to query the balance.
-    function balanceOf(address _owner) external view returns (uint) {
+    function balanceOf(address _owner) public view returns (uint) {
         return _balance(_owner);
     }
 
@@ -231,7 +227,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @param _owner The address that owns the NFTs.
     /// @param _operator The address that acts on behalf of the owner.
     function isApprovedForAll(address _owner, address _operator) external view returns (bool) {
-        return (ownerToOperators[_owner])[_operator];
+        return ownerToOperators[_owner][_operator];
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -251,7 +247,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         // Throws if `_approved` is the current owner
         require(_approved != owner, "IA");
         // Check requirements
-        bool senderIsOwner = (idToOwner[_tokenId] == msg.sender);
+        bool senderIsOwner = (owner == msg.sender);
         bool senderIsApprovedForAll = (ownerToOperators[owner])[msg.sender];
         require(senderIsOwner || senderIsApprovedForAll, "NAO");
         // Set the approval
@@ -264,10 +260,10 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     ///      Throws if `_operator` is the `msg.sender`. (NOTE: This is not written the EIP)
     /// @notice This works even if sender doesn't own any tokens at the time.
     /// @param _operator Address to add to the set of authorized operators.
-    /// @param _approved True if the operators is approved, false to revoke approval.
+    /// @param _approved True if the operator is approved, false to revoke approval.
     function setApprovalForAll(address _operator, bool _approved) external {
         // Throws if `_operator` is the `msg.sender`
-        assert(_operator != msg.sender);
+        require(_operator != msg.sender, "NA");
         ownerToOperators[msg.sender][_operator] = _approved;
         emit ApprovalForAll(msg.sender, _operator, _approved);
     }
@@ -277,7 +273,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     ///      Throws if `_owner` is not the current owner.
     function _clearApproval(address _owner, uint _tokenId) internal {
         // Throws if `_owner` is not the current owner
-        assert(idToOwner[_tokenId] == _owner);
+        require(idToOwner[_tokenId] == _owner, 'NA');
         if (idToApprovals[_tokenId] != address(0)) {
             // Reset approvals
             idToApprovals[_tokenId] = address(0);
@@ -287,7 +283,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @dev Returns whether the given spender can transfer a given token ID
     /// @param _spender address of the spender to query
     /// @param _tokenId uint ID of the token to be transferred
-    /// @return bool whether the msg.sender is approved for the given token ID, is an operator of the owner, or is the owner of the token
+    /// @return bool whether the _spender is approved for the given token ID, is an operator of the owner, or is the owner of the token
     function _isApprovedOrOwner(address _spender, uint _tokenId) internal view returns (bool) {
         address owner = idToOwner[_tokenId];
         bool spenderIsOwner = owner == _spender;
@@ -434,9 +430,11 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @dev Mapping from NFT ID to index of owner
     mapping(uint => uint) internal tokenToOwnerIndex;
 
-    /// @dev  Get token by index
-    function tokenOfOwnerByIndex(address _owner, uint _tokenIndex) public view returns (uint) {
-        return ownerToNFTokenIdList[_owner][_tokenIndex];
+    /// @dev Returns the token ID owned by `_owner` at a given `_tokenIndex` within their token list.
+    /// Reverts if `_tokenIndex` is out of bounds, as required by ERC-721Enumerable.
+    function tokenOfOwnerByIndex(address _owner, uint _tokenIndex) public view returns (uint _token) {
+        _token = ownerToNFTokenIdList[_owner][_tokenIndex];
+        require(_token > 0, "INVALID");
     }
 
     /// @dev Add a NFT to an index mapping to a given address
@@ -453,13 +451,13 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     ///      Throws if `_tokenId` is owned by someone.
     function _addTokenTo(address _to, uint _tokenId) internal {
         // Throws if `_tokenId` is owned by someone
-        assert(idToOwner[_tokenId] == address(0));
+        require(idToOwner[_tokenId] == address(0), 'NZA');
         // Change the owner
         idToOwner[_tokenId] = _to;
         // Update owner token index tracking
         _addTokenToOwnerList(_to, _tokenId);
         // Change count tracking
-        ownerToNFTokenCount[_to] += 1;
+        ownerToNFTokenCount[_to] = ownerToNFTokenCount[_to] + 1;
     }
 
     /// @dev Function to mint tokens
@@ -467,14 +465,12 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     ///      Throws if `_tokenId` is owned by someone.
     /// @param _to The address that will receive the minted tokens.
     /// @param _tokenId The token id to mint.
-    /// @return A boolean that indicates if the operation was successful.
-    function _mint(address _to, uint _tokenId) internal returns (bool) {
+    function _mint(address _to, uint _tokenId) internal {
         // Throws if `_to` is zero address
-        assert(_to != address(0));
+        require(_to != address(0), 'ZA');
         // Add NFT. Throws if `_tokenId` is owned by someone
         _addTokenTo(_to, _tokenId);
         emit Transfer(address(0), _to, _tokenId);
-        return true;
     }
 
     /// @dev Remove a NFT from an index mapping to a given address
@@ -511,13 +507,13 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     ///      Throws if `_from` is not the current owner.
     function _removeTokenFrom(address _from, uint _tokenId) internal {
         // Throws if `_from` is not the current owner
-        assert(idToOwner[_tokenId] == _from);
+        require(idToOwner[_tokenId] == _from, 'NA');
         // Change the owner
         idToOwner[_tokenId] = address(0);
         // Update owner token index tracking
         _removeTokenFromOwnerList(_from, _tokenId);
         // Change count tracking
-        ownerToNFTokenCount[_from] -= 1;
+        ownerToNFTokenCount[_from] = ownerToNFTokenCount[_from] - 1;
     }
 
     function _burn(uint _tokenId) internal {
@@ -561,25 +557,25 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         return votingBalanceLogicData.user_point_history[_tokenId][uepoch].slope;
     }
 
-    /// @notice Get the timestamp for checkpoint `_idx` for `_tokenId`
+    /// @notice Get the checkpoint at `_idx` for `_tokenId`
     /// @param _tokenId token of the NFT
     /// @param _idx User epoch number
-    /// @return Epoch time of the checkpoint
+    /// @return checkpoint
     function user_point_history(uint _tokenId, uint _idx) external view returns (IVotingEscrow.Point memory) {
         return votingBalanceLogicData.user_point_history[_tokenId][_idx];
     }
 
-    function point_history(uint epoch) external view returns (IVotingEscrow.Point memory) {
-        return votingBalanceLogicData.point_history[epoch];
+    function point_history(uint _epoch) external view returns (IVotingEscrow.Point memory) {
+        return votingBalanceLogicData.point_history[_epoch];
     }
 
-    function user_point_epoch(uint tokenId) external view returns (uint) {
-        return votingBalanceLogicData.user_point_epoch[tokenId];
+    function user_point_epoch(uint _tokenId) external view returns (uint) {
+        return votingBalanceLogicData.user_point_epoch[_tokenId];
     }
 
     /// @notice Record global and per-user data to checkpoint
     /// @param _tokenId NFT token ID. No user checkpoint if 0
-    /// @param old_locked Pevious locked amount / end lock time for the user
+    /// @param old_locked previous locked amount / end lock time for the user
     /// @param new_locked New locked amount / end lock time for the user
     function _checkpoint(
         uint _tokenId,
@@ -618,7 +614,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
 
             // Read values of scheduled changes in the slope
             // old_locked.end can be in the past and in the future
-            // new_locked.end can ONLY by in the FUTURE unless everything expired: than zeros
+            // new_locked.end can ONLY be in the FUTURE, unless all locks have expired, in which case it is zero
             old_dslope = slope_changes[old_locked.end];
             if (new_locked.end != 0) {
                 if (new_locked.end == old_locked.end) {
@@ -787,20 +783,20 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         address from = msg.sender;
         if (_value != 0) {
             if(old_locked.isSMNFT) {
-                // assert(IERC20(token).transferFrom(from, burnTokenAddress, _value));
                 assert(_black.burnFrom(from,_value));
             } else {
                 assert(IERC20(token).transferFrom(from, address(this), _value));
             }
         }
 
-        emit Deposit(from, _tokenId, _value, _locked.end, deposit_type, block.timestamp);
+        emit Deposit(from, _tokenId, _value, _locked.end, deposit_type);
         emit Supply(supply_before, supply_before + _value);
     }
 
     /// @notice Record global data to checkpoint
     function checkpoint() external {
         _checkpoint(0, IVotingEscrow.LockedBalance(0, 0, false, false), IVotingEscrow.LockedBalance(0, 0, false, false));
+        emit Checkpoint();
     }
 
     /// @notice Deposit `_value` tokens for `_tokenId` and add to the lock
@@ -870,11 +866,11 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @notice Deposit `_value` additional tokens for `_tokenId` without modifying the unlock time
     /// @param _value Amount of tokens to deposit and add to the lock
     function increase_amount(uint _tokenId, uint _value) external nonreentrant {
-        assert(_isApprovedOrOwner(msg.sender, _tokenId));
+        require(_isApprovedOrOwner(msg.sender, _tokenId), 'NA');
 
         IVotingEscrow.LockedBalance memory _locked = locked[_tokenId];
 
-        assert(_value > 0); // dev: need non-zero value
+        require(_value > 0, 'ZV'); // dev: need non-zero value
         require(_locked.amount > 0, 'ZL');
         require(_locked.end > block.timestamp || _locked.isPermanent, 'EXP');
         
@@ -892,7 +888,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     /// @notice Extend the unlock time for `_tokenId`
     /// @param _lock_duration New number of seconds until tokens unlock
     function increase_unlock_time(uint _tokenId, uint _lock_duration, bool isSMNFT) external nonreentrant {
-        assert(_isApprovedOrOwner(msg.sender, _tokenId));
+        require(_isApprovedOrOwner(msg.sender, _tokenId), 'NA');
 
         IVotingEscrow.LockedBalance memory _locked = locked[_tokenId];
         require(!_locked.isSMNFT && !_locked.isPermanent, "!NORM");
@@ -917,21 +913,20 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     function updateToSMNFT (uint _tokenId, IVotingEscrow.LockedBalance memory _locked) internal {
         _locked.isPermanent = true;
         _locked.isSMNFT = true;
-        uint _amount = uint(int256(_locked.amount));
+        uint _amount = uint256(uint128(_locked.amount));
         smNFTBalance += _amount;
         _locked.end = 0;
-        uint _value = uint256(uint128(_locked.amount));
-        _locked.amount = int128(int256(_value + calculate_sm_nft_bonus(_value)));
+        _locked.amount = int128(int256(_amount + calculate_sm_nft_bonus(_amount)));
         _checkpoint(_tokenId, locked[_tokenId], _locked);
         locked[_tokenId] = _locked;
-        // assert(IERC20(token).transfer(burnTokenAddress, _value));
-        assert(_black.burn(_value));
+        assert(_black.burn(_amount));
+        emit UpdateToSMNFT(_tokenId, _locked.amount, _locked.end, _locked.isPermanent, _locked.isSMNFT);
     }
 
     /// @notice Withdraw all tokens for `_tokenId`
     /// @dev Only possible if the lock has expired
     function withdraw(uint _tokenId) external nonreentrant {
-        assert(_isApprovedOrOwner(msg.sender, _tokenId));
+        require(_isApprovedOrOwner(msg.sender, _tokenId), 'NA');
         require(attachments[_tokenId] == 0 && !voted[_tokenId], "ATT");
 
         IVotingEscrow.LockedBalance memory _locked = locked[_tokenId];
@@ -953,13 +948,12 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         // Burn the NFT
         _burn(_tokenId);
 
-        emit Withdraw(msg.sender, _tokenId, value, block.timestamp);
+        emit Withdraw(msg.sender, _tokenId, value);
         emit Supply(supply_before, supply_before - value);
     }
 
     function lockPermanent(uint _tokenId) external {
-        address sender = msg.sender;
-        require(_isApprovedOrOwner(sender, _tokenId), "NAO");
+        require(_isApprovedOrOwner(msg.sender, _tokenId), "NAO");
         
         IVotingEscrow.LockedBalance memory _newLocked = locked[_tokenId];
         require(!_newLocked.isSMNFT && !_newLocked.isPermanent, "!NORM");
@@ -975,12 +969,11 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         if(voted[_tokenId]) {
             IVoter(voter).poke(_tokenId);
         }
-        emit LockPermanent(sender, _tokenId, _amount, block.timestamp);
+        emit LockPermanent(idToOwner[_tokenId], _tokenId, _amount);
         emit MetadataUpdate(_tokenId);
     }
 
     function unlockPermanent(uint _tokenId) external {
-        address sender = msg.sender;
         require(_isApprovedOrOwner(msg.sender, _tokenId), "NAO");
 
         require(attachments[_tokenId] == 0 && !voted[_tokenId], "ATT");
@@ -994,7 +987,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         _checkpoint(_tokenId, locked[_tokenId], _newLocked);
         locked[_tokenId] = _newLocked;
 
-        emit UnlockPermanent(sender, _tokenId, _amount, block.timestamp);
+        emit UnlockPermanent(idToOwner[_tokenId], _tokenId, _amount);
         emit MetadataUpdate(_tokenId);
     }
 
@@ -1032,7 +1025,6 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     }
 
     /// @notice Calculate total voting power
-    /// @dev Adheres to the ERC20 `totalSupply` interface for Aragon compatibility
     /// @return Total voting power
     function totalSupplyAtT(uint t) public view returns (uint) {
         return VotingBalanceLogic.totalSupplyAtT(t, epoch, slope_changes,  votingBalanceLogicData);
@@ -1075,8 +1067,8 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
     function merge(uint _from, uint _to) external nonreentrant {
         require(attachments[_from] == 0 && !voted[_from], "ATT");
         require(_from != _to, "SAME");
-        require(_isApprovedOrOwner(msg.sender, _from) && 
-        _isApprovedOrOwner(msg.sender, _to), "NAO");
+
+        require(msg.sender == ownerOf(_from)  && msg.sender == ownerOf(_to) , "NAO");
 
         IVotingEscrow.LockedBalance memory _locked0 = locked[_from];
         IVotingEscrow.LockedBalance memory _locked1 = locked[_to];
@@ -1127,8 +1119,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
             uint(int256(_locked0.amount)),
             uint(int256(_locked1.amount)),
             uint(int256(newLockedTo.amount)),
-            newLockedTo.end,
-            block.timestamp
+            newLockedTo.end
         );
         emit MetadataUpdate(_to);
     }
@@ -1173,8 +1164,7 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
             msg.sender,
             uint(int256(locked[_tokenId1].amount)),
             uint(int256(_splitAmount)),
-            newLocked.end,
-            block.timestamp
+            newLocked.end
         );
     }
 
@@ -1201,30 +1191,30 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
 
     /**
      * @notice Gets the current votes balance for `account`
-     * @param tokenId The token ID to get votes balance
+     * @param _tokenId The token ID to get votes balance
      * @return The number of current votes for `tokenId`
      */
-    function getVotes(uint tokenId) external view returns (uint) {
-        return VotingBalanceLogic.balanceOfNFT(tokenId, block.timestamp, votingBalanceLogicData);
+    function getVotes(uint _tokenId) external view returns (uint) {
+        return VotingBalanceLogic.balanceOfNFT(_tokenId, block.timestamp, votingBalanceLogicData);
     }
 
-    function getPastVotes(uint tokenId, uint timestamp)
+    function getPastVotes(uint _tokenId, uint timestamp)
         public
         view
         returns (uint)
     {
-        return VotingBalanceLogic.balanceOfNFT(tokenId, timestamp, votingBalanceLogicData);
+        return VotingBalanceLogic.balanceOfNFT(_tokenId, timestamp, votingBalanceLogicData);
     }
 
-    function getsmNFTPastVotes(uint tokenId, uint timestamp) 
+    function getsmNFTPastVotes(uint _tokenId, uint timestamp)
         public
         view
         returns (uint)
     {
-        uint userEpoch = votingBalanceLogicData.user_point_epoch[tokenId];
+        uint userEpoch = votingBalanceLogicData.user_point_epoch[_tokenId];
         if (userEpoch == 0) return 0;
-        uint idx = VotingBalanceLogic.getPastUserPointIndex(userEpoch, tokenId, timestamp, votingBalanceLogicData);
-        IVotingEscrow.Point memory up = votingBalanceLogicData.user_point_history[tokenId][idx];
+        uint idx = VotingBalanceLogic.getPastUserPointIndex(userEpoch, _tokenId, timestamp, votingBalanceLogicData);
+        IVotingEscrow.Point memory up = votingBalanceLogicData.user_point_history[_tokenId][idx];
         return up.smNFT != 0 ? (up.smNFT + up.smNFTBonus) : 0;
     }
 
@@ -1236,11 +1226,11 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
         return smNFTBalance;
     }
 
-    function calculate_sm_nft_bonus(uint amount) public view returns (uint){
-        return (SMNFT_BONUS * amount) / PRECISISON;
+    function calculate_sm_nft_bonus(uint amount) public pure returns (uint){
+        return (SMNFT_BONUS * amount) / PRECISION;
     }
 
-    function calculate_original_sm_nft_amount(uint amount) public view returns (uint){
-        return (amount * PRECISISON) / (SMNFT_BONUS + PRECISISON);
+    function calculate_original_sm_nft_amount(uint amount) public pure returns (uint){
+        return (amount * PRECISION) / (SMNFT_BONUS + PRECISION);
     }
 }

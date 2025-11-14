@@ -72,10 +72,10 @@ contract SuperNovaClaims is ISuperNovaClaims {
     ///@return season_ ISuperNovaClaims.Season The Season struct that was initialized.
     function startSeason(
         uint256 start_time_
-    ) external onlyOwner returns (ISuperNovaClaims.Season memory season_)
+    ) external onlyOwner returns(ISuperNovaClaims.Season memory season_)
     {
         require(start_time_ > 0, "CANNOT START AT 0");
-        require(season.start_time == 0, "SEASON ALREADY STARTED");
+        require(season.start_time==0, "SEASON ALREADY STARTED");
         season_.start_time = start_time_;
         season = season_;
     }
@@ -83,21 +83,21 @@ contract SuperNovaClaims is ISuperNovaClaims {
     ///@notice Queries the finalized status of a season.
     ///@dev A season is finalized if its claim time is set.
     ///@return _finalized bool The finalized status of the provided season.
-    function isSeasonFinalized() public view returns (bool _finalized)
+    function isSeasonFinalized() public view returns(bool _finalized)
     {
         _finalized = season.claim_end_time > 0;
     }
 
     ///@notice Queries if a season has been finalized and can have rewards claimed from it.
     ///@return _active bool True if the season has ended at the provided timestamp
-    function isSeasonClaimingActive() public view returns (bool _active)
+    function isSeasonClaimingActive() public view returns(bool _active)
     {
         _active = isSeasonFinalized() && season.claim_end_time >= block.timestamp;
     }
 
     ///@notice Queries if a season has been finalized and the claim period has already elapsed.
     ///@return _ended bool True if the season's rewards claim period has elapsed.
-    function isSeasonClaimingEnded() public view returns (bool _ended)
+    function isSeasonClaimingEnded() public view returns(bool _ended)
     {
         _ended = isSeasonFinalized() && season.claim_end_time < block.timestamp;
     }
@@ -127,7 +127,7 @@ contract SuperNovaClaims is ISuperNovaClaims {
         Season storage _season = season;
         require(_season.start_time > 0, "SEASON NOT FOUND");
         require(!isSeasonFinalized(), "SEASON_FINALIZED");
-        require(_season.reward_amount > 0, "NO REWARD AMOUNT");
+        require(_season.reward_amount>0, "NO REWARD AMOUNT");
         require(claim_duration_ >= 1 days && claim_duration_ < 1000 days, "CLAIM DURATION OUT OF BOUNDS");
 
         bool transfer_success = token.transferFrom(treasury, address(this), _season.reward_amount);
@@ -145,7 +145,7 @@ contract SuperNovaClaims is ISuperNovaClaims {
         Season storage _season = season;
         require(_season.start_time > 0, "SEASON NOT FOUND");
         require(isSeasonFinalized(), "SEASON_NOT_FINALIZED");
-        require(_season.reward_amount > 0, "NO REWARD AMOUNT");
+        require(_season.reward_amount>0, "NO REWARD AMOUNT");
         _season.claim_end_time = _season.claim_end_time + claim_duration_;
     }
 
@@ -208,11 +208,11 @@ contract SuperNovaClaims is ISuperNovaClaims {
     }
 
     ///@notice get reward tokens claimable by a player in the specified season.
-    function getClaimableReward(address userAddress) public view returns (uint256 _reward)
+    function getClaimableReward(address userAddress) public view returns(uint256 _reward)
     {
 
         _reward = season_rewards[userAddress] - claimed_rewards[userAddress];
-        if (!isSeasonClaimingActive())
+        if( !isSeasonClaimingActive() )
         {
             _reward = 0;
         }
@@ -231,7 +231,6 @@ contract SuperNovaClaims is ISuperNovaClaims {
         require(_owner != address(0));
         owner = _owner;
     }
-
     function setOwner2(address _owner) external onlyOwner {
         require(_owner != address(0));
         secondOwner = _owner;

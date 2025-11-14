@@ -1,62 +1,23 @@
-/**
- *Submitted for verification at FtmScan.com on 2022-02-20
-*/
-
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
-// ftm.guru's extension of Solidly's periphery (Router)
-// https://github.com/andrecronje/solidly/blob/master/contracts/BaseV1-periphery.sol
-// BaseV1Router02.sol : Supporting Fee-on-transfer Tokens
-// https://github.com/ftm1337/solidly-with-FoT/blob/master/contracts/BaseV1-periphery.sol
-
 pragma solidity 0.8.13;
 
 import './interfaces/IAlgebraCLFactory.sol';
 import './interfaces/IAlgebraPoolAPIStorage.sol';
 
-import '@cryptoalgebra/integral-periphery/contracts/interfaces/IQuoterV2.sol';
 import '@cryptoalgebra/integral-periphery/contracts/interfaces/ISwapRouter.sol';
-
-import './interfaces/IERC20.sol';
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import './interfaces/IPair.sol';
 import './interfaces/IRouterHelper.sol';
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IRouter.sol";
 import "./interfaces/IPairFactory.sol";
+import "./libraries/Math.sol";
+import "./interfaces/IWETH.sol";
 
-library Math {
-    function min(uint a, uint b) internal pure returns (uint) {
-        return a < b ? a : b;
-    }
-    function sqrt(uint y) internal pure returns (uint z) {
-        if (y > 3) {
-            z = y;
-            uint x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
-    }
-    function sub(uint x, uint y) internal pure returns (uint z) {
-        require((z = x - y) <= x);
-    }
-}
+contract RouterV2 is ReentrancyGuard {
 
-interface IWETH {
-    function deposit() external payable;
-    function transfer(address to, uint value) external returns (bool);
-    function withdraw(uint) external;
-}
-
-// Experimental Extension [ftm.guru/solidly/BaseV1Router02]
-// contract BaseV1Router02 is BaseV1Router01
-// with Support for Fee-on-Transfer Tokens
-contract RouterV2 is Ownable, ReentrancyGuard {
-
-	using Math for uint;
+	using SafeERC20 for IERC20;
 
     struct PairSwapMetadata {
         uint decimals0;
@@ -93,16 +54,15 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         uint deadline;
     }
 
-    address public factory;
-    IWETH public wETH;
+    address public immutable factory;
+    IWETH public immutable wETH;
     uint internal constant MINIMUM_LIQUIDITY = 10**3;
 
-    address public swapRouter;
-    IAlgebraCLFactory public algebraFactory;
-    IAlgebraPoolAPIStorage public algebraPoolAPIStorage;
+    address public immutable swapRouter;
+    IAlgebraPoolAPIStorage public immutable algebraPoolAPIStorage;
     address public immutable routerHelper;
 
-    // swap event for the referral system
+    // swap event for the rebate system
     event Swap(address indexed sender,uint amount0In, uint amount0Out,address _tokenIn, address indexed to, bool stable);
 
     modifier ensure(uint deadline) {
@@ -110,12 +70,11 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         _;
     }
 
-    constructor(address _factory, address _wETH, address _swapRouter, address _algebraFactory, address _algebraPoolAPIStorage, address _routerHelper) {
+    constructor(address _factory, address _wETH, address _swapRouter, address _algebraPoolAPIStorage, address _routerHelper) {
         factory = _factory;
         wETH = IWETH(_wETH);
         swapRouter = _swapRouter;
         algebraPoolAPIStorage = IAlgebraPoolAPIStorage(_algebraPoolAPIStorage);
-        algebraFactory = IAlgebraCLFactory(_algebraFactory);
         routerHelper = _routerHelper;
     }
 
@@ -143,7 +102,23 @@ contract RouterV2 is Ownable, ReentrancyGuard {
     // calculates the CREATE2 address for a pair without making any external calls
     function pairFor(address tokenA, address tokenB, bool stable) public view returns (address pair) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
-        return IPairFactory(factory).getPair(token0, token1, stable);
+        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
+        bytes32 initCodeHash = IPairFactory(factory).pairCodeHash();
+        address pairGenerator = IPairFactory(factory).pairGenerator();
+        pair = address(
+            uint160(
+                uint256(
+                    keccak256(
+                        abi.encodePacked(
+                            hex"ff",
+                            pairGenerator,
+                            salt,
+                            initCodeHash
+                        )
+                    )
+                )
+            )
+        );
     }
 
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
@@ -197,11 +172,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         pairSwapMetaData.balanceA = pairSwapMetaData.balanceA + amountIn - feeAmount;
         pairSwapMetaData.balanceB -= amountOut;
 
-        if(_k(pairSwapMetaData.balanceA, pairSwapMetaData.balanceB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable) >= _k(pairSwapMetaData.reserveA, pairSwapMetaData.reserveB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable)){
-            return true;
-        }
-
-        return false;
+        return _k(pairSwapMetaData.balanceA, pairSwapMetaData.balanceB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable) >= _k(pairSwapMetaData.reserveA, pairSwapMetaData.reserveB, pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB, pairSwapMetaData.stable);
     }
 
     
@@ -212,7 +183,6 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         uint amountADesired,
         uint amountBDesired
     ) external view returns (uint amountA, uint amountB, uint liquidity) {
-        // create the pair if it doesn't exist yet
         address _pair = IPairFactory(factory).getPair(tokenA, tokenB, stable);
         (uint reserveA, uint reserveB) = (0,0);
         uint _totalSupply = 0;
@@ -243,7 +213,6 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         bool stable,
         uint liquidity
     ) external view returns (uint amountA, uint amountB) {
-        // create the pair if it doesn't exist yet
         address _pair = IPairFactory(factory).getPair(tokenA, tokenB, stable);
 
         if (_pair == address(0)) {
@@ -454,13 +423,13 @@ contract RouterV2 is Ownable, ReentrancyGuard {
 
     // **** SWAP ****
     // requires the initial amount to have already been sent to the first pair
-    function _swap(uint[] memory amounts, IRouter.route[] memory routes) internal virtual {
+    function _swap(uint[] memory amounts, IRouter.route[] memory routes, uint deadline) internal virtual {
         uint256 routesLen = routes.length;
         for (uint i = 0; i < routesLen; i++) {
             require(routes[i].receiver != address(0), "ZA");
             if(routes[i].concentrated){
                 if (IERC20(routes[i].from).allowance(address(this), swapRouter) < amounts[i]) {
-                    IERC20(routes[i].from).approve(swapRouter, amounts[i]);
+                    IERC20(routes[i].from).forceApprove(swapRouter, amounts[i]);
                 }
                 ISwapRouter.ExactInputSingleParams memory inputParams;
                 inputParams = ISwapRouter.ExactInputSingleParams ({
@@ -468,7 +437,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
                     tokenOut: routes[i].to,
                     deployer: IAlgebraPoolAPIStorage(algebraPoolAPIStorage).pairToDeployer(routes[i].pair),
                     recipient: routes[i].receiver,
-                    deadline: block.timestamp + 600,
+                    deadline: deadline,
                     amountIn: amounts[i],
                     amountOutMinimum: 0,
                     limitSqrtPrice: 0
@@ -489,37 +458,6 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         }
     }
 
-    // function swapExactTokensForTokensSimple(
-    //     uint amountIn,
-    //     uint amountOutMin,
-    //     address tokenFrom,
-    //     address tokenTo,
-    //     bool stable,
-    //     address to,
-    //     bool concentrated,
-    //     uint deadline
-    // ) external ensure(deadline) returns (uint[] memory amounts) {
-    //     route[] memory routes = new route[](1);
-    //     routes[0].from = tokenFrom;
-    //     routes[0].to = tokenTo;
-    //     routes[0].stable = stable;
-    //     routes[0].concentrated = concentrated;
-    //     (amounts,) = getAmountsOut(amountIn, routes);
-    //     require(amounts[amounts.length - 1] >= amountOutMin, 'IOA');
-    //     if(!routes[0].concentrated) {
-    //     _safeTransferFrom(
-    //         routes[0].from, msg.sender, pairFor(routes[0].from, routes[0].to, routes[0].stable), amounts[0]
-    //     );
-    //     }
-    //     else{
-    //         IERC20(routes[0].from).transferFrom(msg.sender, address(this), amounts[0]);
-    //         if (IERC20(routes[0].from).allowance(address(this), swapRouter) < amounts[0]) {
-    //             IERC20(routes[0].from).approve(swapRouter, amounts[0]);
-    //         }
-    //     }
-    //     _swap(amounts, routes, to);
-    // }
-
     function swapExactTokensForTokens(
         uint amountIn,
         uint amountOutMin,
@@ -539,13 +477,13 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         else{
             IERC20(routes[0].from).transferFrom(msg.sender, address(this), amounts[0]);
             if (IERC20(routes[0].from).allowance(address(this), swapRouter) < amounts[0]) {
-                IERC20(routes[0].from).approve(swapRouter, amounts[0]);
+                IERC20(routes[0].from).forceApprove(swapRouter, amounts[0]);
             }
         }
-        _swap(amounts, routes);
+        _swap(amounts, routes, deadline);
     }
 
-        function swapExactETHForTokens(uint amountOutMin, IRouter.route[] calldata routes, address to, uint deadline) external payable ensure(deadline) nonReentrant returns (uint[] memory amounts) {
+    function swapExactETHForTokens(uint amountOutMin, IRouter.route[] calldata routes, address to, uint deadline) external payable ensure(deadline) nonReentrant returns (uint[] memory amounts) {
         require(routes[0].from == address(wETH), 'INP');
         require(routes[routes.length - 1].receiver == to, 'IR'); // Invalid recipient
         (amounts,,) = IRouterHelper(routerHelper).getAmountsOut(msg.value, routes);
@@ -556,10 +494,10 @@ contract RouterV2 is Ownable, ReentrancyGuard {
             assert(wETH.transfer(pairFor(routes[0].from, routes[0].to, routes[0].stable),amounts[0]));
         } else {
             if (IERC20(address(wETH)).allowance(address(this), swapRouter) < amounts[0]) {
-                IERC20(address(wETH)).approve(swapRouter, amounts[0]);
+                IERC20(address(wETH)).forceApprove(swapRouter, amounts[0]);
             }
         }
-        _swap(amounts, routes);
+        _swap(amounts, routes, deadline);
     }
 
     function swapExactTokensForETH(uint amountIn, uint amountOutMin, IRouter.route[] calldata routes, address to, uint deadline)
@@ -581,10 +519,10 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         else{
             IERC20(routes[0].from).transferFrom(msg.sender, address(this), amounts[0]);
             if (IERC20(routes[0].from).allowance(address(this), swapRouter) < amounts[0]) {
-                IERC20(routes[0].from).approve(swapRouter, amounts[0]);
+                IERC20(routes[0].from).forceApprove(swapRouter, amounts[0]);
             }
         }
-        _swap(amounts, routes);
+        _swap(amounts, routes, deadline);
         wETH.withdraw(amounts[amounts.length - 1]);
         _safeTransferETH(to, amounts[amounts.length - 1]);
     }
@@ -597,7 +535,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
     ) external ensure(deadline) nonReentrant returns (uint[] memory) {
         require(routes[routes.length - 1].receiver == to, 'IR'); // Invalid recipient
         _safeTransferFrom(routes[0].from, msg.sender, pairFor(routes[0].from, routes[0].to, routes[0].stable), amounts[0]);
-        _swap(amounts, routes);
+        _swap(amounts, routes, deadline);
         return amounts;
     }
 
@@ -609,14 +547,14 @@ contract RouterV2 is Ownable, ReentrancyGuard {
     function _safeTransfer(address token, address to, uint256 value) internal {
         require(token.code.length > 0, "CODELEN");
         (bool success, bytes memory data) =
-        token.call(abi.encodeWithSelector(IERC20.transfer.selector, to, value));
+        token.call(abi.encodeCall(IERC20.transfer, (to, value)));
         require(success && (data.length == 0 || abi.decode(data, (bool))), "IST");
     }
 
     function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
         require(token.code.length > 0, "CODELEN");
         (bool success, bytes memory data) =
-        token.call(abi.encodeWithSelector(IERC20.transferFrom.selector, from, to, value));
+        token.call(abi.encodeCall(IERC20.transferFrom, (from, to, value)));
         require(success && (data.length == 0 || abi.decode(data, (bool))), "ISTF");
     }
 
@@ -692,7 +630,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
             { // scope to avoid stack too deep errors
             (uint reserve0, uint reserve1,) = pair.getReserves();
             (uint reserveInput,) = input == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
-            amountInput = IERC20(input).balanceOf(address(pair)).sub(reserveInput);
+            amountInput = IERC20(input).balanceOf(address(pair)) - reserveInput;
             (amountOutput,) = IRouterHelper(routerHelper).getAmountOutForFeeOnTransfer(amountInput, input, output);
             }
             (uint amount0Out, uint amount1Out) = input == token0 ? (uint(0), amountOutput) : (amountOutput, uint(0));
@@ -721,7 +659,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         uint balanceBefore = IERC20(routes[routesLen - 1].to).balanceOf(to);
         _swapSupportingFeeOnTransferTokens(routes, to);
         require(
-            IERC20(routes[routesLen - 1].to).balanceOf(to).sub(balanceBefore) >= amountOutMin,
+            IERC20(routes[routesLen - 1].to).balanceOf(to) - balanceBefore >= amountOutMin,
             'IOA'
         );
     }
@@ -745,7 +683,7 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         uint balanceBefore = IERC20(routes[routesLen - 1].to).balanceOf(to);
         _swapSupportingFeeOnTransferTokens(routes, to);
         require(
-            IERC20(routes[routesLen - 1].to).balanceOf(to).sub(balanceBefore) >= amountOutMin,
+            IERC20(routes[routesLen - 1].to).balanceOf(to) - balanceBefore >= amountOutMin,
             'IOA'
         );
     }
@@ -770,25 +708,5 @@ contract RouterV2 is Ownable, ReentrancyGuard {
         require(amountOut >= amountOutMin, 'IOA');
         wETH.withdraw(amountOut);
         _safeTransferETH(to, amountOut);
-    }
-
-    function setSwapRouter(address _swapRouter) external onlyOwner {
-        swapRouter = _swapRouter;
-    }
-
-    function setAlgebraFactory(address _algebraFactory) external onlyOwner {
-        algebraFactory = IAlgebraCLFactory(_algebraFactory);
-    }
-
-    function setAlgebraPoolAPI(address _algebraPoolAPIStorage) external onlyOwner {
-        algebraPoolAPIStorage = IAlgebraPoolAPIStorage(_algebraPoolAPIStorage);
-    }
-
-    function setWeTH(address _wETH) external onlyOwner {
-        wETH = IWETH(_wETH);
-    }
-
-    function version() external pure returns (string memory) {
-        return "1.0.0-patch";
     }
 }

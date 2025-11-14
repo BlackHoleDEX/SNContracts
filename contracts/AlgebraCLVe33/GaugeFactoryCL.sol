@@ -16,12 +16,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 import {MAX_REFERRAL_FEE_CAP} from '../libraries/Constants.sol';
-
-
-interface IGaugeCL {
-    function activateEmergencyMode() external;
-    function stopEmergencyMode() external;
-}
+import '../interfaces/IGaugeCL.sol';
 
 interface ICustomPoolDeployer {
     function setCommunityFee(address pool, uint16 newCommunityFee) external;
@@ -95,7 +90,6 @@ contract GaugeFactoryCL is IGaugeFactoryCL, OwnableUpgradeable {
     }
 
     function getIncentiveKey(address _rewardToken, address _bonusRewardToken, address _pool, address _algebraEternalFarming) internal view returns (IncentiveKey memory) {
-        IAlgebraEternalFarmingCustom algebraEternalFarming = IAlgebraEternalFarmingCustom(_algebraEternalFarming);
         IERC20Minimal rewardToken = IERC20Minimal(_rewardToken);
         IERC20Minimal bonusRewardToken = IERC20Minimal(_bonusRewardToken);
         uint256 nonce = IAlgebraEternalFarming(_algebraEternalFarming).numOfIncentives();

@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 pragma solidity ^0.8.13;
 
-import './libraries/Math.sol';
 import './interfaces/IBribe.sol';
-import './interfaces/IERC20.sol';
-import './interfaces/IPairInfo.sol';
-import './interfaces/IPairFactory.sol';
 import './interfaces/IVotingEscrow.sol';
 import './interfaces/IGaugeManager.sol';
 import './interfaces/IPermissionsRegistry.sol';
@@ -13,21 +9,16 @@ import './interfaces/ITokenHandler.sol';
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 
 contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
-    using SafeERC20Upgradeable for IERC20Upgradeable;
 
     address public _ve;                                         // the ve token that governs these contracts
-    address internal base;                                      // $the token
     address public permissionRegistry;                          // registry to check accesses
-    address[] public pools;                                     // all pools viable for incentives
-    address public epochOwner;
-    address public tokenHandler;                     
+    address public tokenHandler;
     uint256 public maxVotingNum;
     uint public EPOCH_DURATION;
     uint256 internal constant MIN_VOTING_NUM = 10;
+    uint256 internal constant MAX_VOTING_NUM = 20;
     IGaugeManager public gaugeManager;
     
     mapping(uint256 => mapping(address => uint256)) public votes;  // nft      => pool     => votes
@@ -42,12 +33,14 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     // epochStart => totalWeight snapshot
     mapping(uint256 => uint256) public epochTotalWeight;
 
-    mapping(uint256 => uint256) public lastVoted;                     // nft      => timestamp of last vote (this is shifted to thursday of that epoc)
+    mapping(uint256 => uint256) public lastVoted;                     // nft      => timestamp of last vote (this is shifted to thursday of that epoch)
     mapping(uint256 => uint256) public lastVotedTimestamp;            // nft      => timestamp of last vote
 
-    event Voted(address indexed voter, uint256 tokenId, uint256 weight);
-    event Abstained(uint256 tokenId, uint256 weight);
+    event Voted(address indexed voter, uint256 indexed tokenId, address indexed pool, uint256 weight);
+    event Abstained(uint256 indexed tokenId, address indexed pool, uint256 weight);
     event SetPermissionRegistry(address indexed old, address indexed latest);
+    event SetMaxVotingNumber(uint256 old, uint256 latest);
+    event SetGaugeManager(address indexed old, address indexed latest);
 
     constructor() {}
 
@@ -61,11 +54,10 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         __Ownable_init();
         __ReentrancyGuard_init();
         _ve = __ve;
-        base = IVotingEscrow(__ve).token();
         gaugeManager = IGaugeManager(_gaugeManager);
         permissionRegistry = _permissionRegistry;
         tokenHandler = _tokenHandler;
-        maxVotingNum = 30;
+        maxVotingNum = 20;
         EPOCH_DURATION = BlackTimeLibrary.WEEK;
     }
  
@@ -82,11 +74,6 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         _;
     }
 
-    modifier Governance() {
-        require(IPermissionsRegistry(permissionRegistry).hasRole("GOVERNANCE",msg.sender), 'GOVERNANCE');
-        _;
-    }
-
     modifier onlyGaugeManager() {
         require(msg.sender == address(gaugeManager), "N_G_M");
         _;
@@ -100,16 +87,6 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     --------------------------------------------------------------------------------
     ----------------------------------------------------------------------------- */
 
-    function getAutomationRegistry() external view returns (address){
-        return epochOwner;
-    }
-
-    function setEpochOwner(address _epochOwner) external onlyOwner {
-        require(_epochOwner != address(0), "ZA");
-        epochOwner = _epochOwner;
-    }
-
-
     /// @notice Set a new PermissionRegistry
     function setPermissionsRegistry(address _permissionRegistry) external onlyOwner {
         require(_permissionRegistry.code.length > 0, "CODELEN");
@@ -120,6 +97,8 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     function setMaxVotingNum(uint256 _maxVotingNum) external VoterAdmin {
         require (_maxVotingNum >= MIN_VOTING_NUM, "LOW_VOTE");
+        require (_maxVotingNum <= MAX_VOTING_NUM, "HIGH_VOTE");
+        emit SetMaxVotingNumber(maxVotingNum, _maxVotingNum);
         maxVotingNum = _maxVotingNum;
     }
 
@@ -152,16 +131,16 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             if (_votes != 0) {
                 weights[_pool] -= _votes;
                 epochPoolWeight[epochNext][_pool] = weights[_pool];
-                votes[_tokenId][_pool] -= _votes;
+                votes[_tokenId][_pool] = 0;
                 address internal_bribe = gaugeManager.fetchInternalBribeFromPool(_pool);
                 address external_bribe = gaugeManager.fetchExternalBribeFromPool(_pool);
-                IBribe(internal_bribe).withdraw(uint256(_votes), _tokenId);
-                IBribe(external_bribe).withdraw(uint256(_votes), _tokenId);
+                IBribe(internal_bribe).withdraw(_votes, _tokenId);
+                IBribe(external_bribe).withdraw(_votes, _tokenId);
 
                 // decrease totalWeight irrespective of gauge is killed/alive for this current pool
                 _totalWeight += _votes;
                 
-                emit Abstained(_tokenId, _votes);
+                emit Abstained(_tokenId, _pool, _votes);
             }
         }
         totalWeight -= _totalWeight;
@@ -238,11 +217,11 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
                 address internal_bribe = gaugeManager.fetchInternalBribeFromPool(_pool);
                 address external_bribe = gaugeManager.fetchExternalBribeFromPool(_pool);
                 
-                IBribe(internal_bribe).deposit(uint256(_poolWeight), _tokenId);
-                IBribe(external_bribe).deposit(uint256(_poolWeight), _tokenId);
+                IBribe(internal_bribe).deposit(_poolWeight, _tokenId);
+                IBribe(external_bribe).deposit(_poolWeight, _tokenId);
                 
                 _usedWeight += _poolWeight;
-                emit Voted(msg.sender, _tokenId, _poolWeight);
+                emit Voted(msg.sender, _tokenId, _pool,_poolWeight);
             }
         }
         if (_usedWeight > 0) IVotingEscrow(_ve).voting(_tokenId);
@@ -267,11 +246,6 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     --------------------------------------------------------------------------------
     ----------------------------------------------------------------------------- */
 
-    /// @notice view the total length of the pools
-    function length() external view returns (uint256) {
-        return pools.length;
-    }
-
     /// @notice view the total length of the voted pools given a tokenId
     function poolVoteLength(uint256 tokenId) external view returns(uint256) { 
         return poolVote[tokenId].length;
@@ -279,6 +253,7 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     function setGaugeManager(address _gaugeManager) external VoterAdmin {
         require(_gaugeManager != address(0));
+        emit SetGaugeManager(address(gaugeManager), _gaugeManager);
         gaugeManager = IGaugeManager(_gaugeManager);
     }
 
