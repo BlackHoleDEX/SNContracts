@@ -108,6 +108,10 @@ contract RouterHelper is OwnableUpgradeable {
                         uint decimals0 = IERC20(routes[i].from).decimals();
                         uint decimals1 = IERC20(routes[i].to).decimals();
 
+                        if(routes[i].from > routes[i].to) {
+                            (decimals0, decimals1) = (decimals1, decimals0);
+                        }
+
                         (uint beforeReserve0, uint beforeReserve1,) = IPair(routes[i].pair).getReserves();
 
                         // Check if this is a stable pair to use appropriate price formula
