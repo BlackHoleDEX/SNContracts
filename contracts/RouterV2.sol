@@ -312,6 +312,25 @@ contract RouterV2 is ReentrancyGuard {
     }
 
     // **** REMOVE LIQUIDITY ****
+    /// @dev Internal helper, no reentrancy guard. Public/externals must be `nonReentrant`
+    ///      and delegate to this to avoid nested `nonReentrant` calls.
+    function _removeLiquidity(
+        address tokenA,
+        address tokenB,
+        bool stable,
+        uint liquidity,
+        uint amountAMin,
+        uint amountBMin,
+        address to
+    ) internal returns (uint amountA, uint amountB) {
+        address pair = pairFor(tokenA, tokenB, stable);
+        require(IPair(pair).transferFrom(msg.sender, pair, liquidity), "ITFM"); // send liquidity to pair
+        (uint amount0, uint amount1) = IPair(pair).burn(to);
+        (address token0,) = sortTokens(tokenA, tokenB);
+        (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
+        require(amountA >= amountAMin && amountB >= amountBMin, 'IAA');
+    }
+
     function removeLiquidity(
         address tokenA,
         address tokenB,
@@ -322,12 +341,15 @@ contract RouterV2 is ReentrancyGuard {
         address to,
         uint deadline
     ) public ensure(deadline) nonReentrant returns (uint amountA, uint amountB) {
-        address pair = pairFor(tokenA, tokenB, stable);
-        require(IPair(pair).transferFrom(msg.sender, pair, liquidity), "ITFM"); // send liquidity to pair
-        (uint amount0, uint amount1) = IPair(pair).burn(to);
-        (address token0,) = sortTokens(tokenA, tokenB);
-        (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
-        require(amountA >= amountAMin && amountB >= amountBMin, 'IAA');
+        (amountA, amountB) = _removeLiquidity(
+            tokenA,
+            tokenB,
+            stable,
+            liquidity,
+            amountAMin,
+            amountBMin,
+            to
+        );
     }
 
     function removeLiquidityETH(
@@ -339,15 +361,14 @@ contract RouterV2 is ReentrancyGuard {
         address to,
         uint deadline
     ) public ensure(deadline) nonReentrant returns (uint amountToken, uint amountETH) {
-        (amountToken, amountETH) = removeLiquidity(
+        (amountToken, amountETH) = _removeLiquidity(
             token,
             address(wETH),
             stable,
             liquidity,
             amountTokenMin,
             amountETHMin,
-            address(this),
-            deadline
+            address(this)
         );
         _safeTransfer(token, to, amountToken);
         wETH.withdraw(amountETH);
@@ -384,8 +405,16 @@ contract RouterV2 is ReentrancyGuard {
                 "IA"
             );
         }
-        
-        return removeLiquidity(tokenA, tokenB, stable, liquidity, amountAMin, amountBMin, to, deadline);
+
+        (amountA, amountB) = _removeLiquidity(
+            tokenA,
+            tokenB,
+            stable,
+            liquidity,
+            amountAMin,
+            amountBMin,
+            to
+        );
     }
 
     function removeLiquidityETHWithPermit(
@@ -417,8 +446,16 @@ contract RouterV2 is ReentrancyGuard {
                 "IA"
             );
         }
-        
-        return removeLiquidity(token, address(wETH), stable, liquidity, amountTokenMin, amountETHMin, to, deadline);
+
+        (amountToken, amountETH) = _removeLiquidity(
+            token,
+            address(wETH),
+            stable,
+            liquidity,
+            amountTokenMin,
+            amountETHMin,
+            to
+        );
     }
 
     // **** SWAP ****
@@ -570,15 +607,14 @@ contract RouterV2 is ReentrancyGuard {
         address to,
         uint deadline
     ) public ensure(deadline) nonReentrant returns (uint amountToken, uint amountETH) {
-        (amountToken, amountETH) = removeLiquidity(
+        (amountToken, amountETH) = _removeLiquidity(
             token,
             address(wETH),
             stable,
             liquidity,
             amountTokenMin,
             amountETHMin,
-            address(this),
-            deadline
+            address(this)
         );
         _safeTransfer(token, to, IERC20(token).balanceOf(address(this)));
         wETH.withdraw(amountETH);
