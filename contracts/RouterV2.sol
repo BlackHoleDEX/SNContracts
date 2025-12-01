@@ -321,8 +321,9 @@ contract RouterV2 is ReentrancyGuard {
         uint liquidity,
         uint amountAMin,
         uint amountBMin,
-        address to
-    ) internal returns (uint amountA, uint amountB) {
+        address to,
+        uint deadline
+    ) internal ensure(deadline) returns (uint amountA, uint amountB) {
         address pair = pairFor(tokenA, tokenB, stable);
         require(IPair(pair).transferFrom(msg.sender, pair, liquidity), "ITFM"); // send liquidity to pair
         (uint amount0, uint amount1) = IPair(pair).burn(to);
@@ -348,7 +349,8 @@ contract RouterV2 is ReentrancyGuard {
             liquidity,
             amountAMin,
             amountBMin,
-            to
+            to,
+            deadline
         );
     }
 
@@ -368,7 +370,8 @@ contract RouterV2 is ReentrancyGuard {
             liquidity,
             amountTokenMin,
             amountETHMin,
-            address(this)
+            address(this),
+            deadline
         );
         _safeTransfer(token, to, amountToken);
         wETH.withdraw(amountETH);
@@ -413,7 +416,8 @@ contract RouterV2 is ReentrancyGuard {
             liquidity,
             amountAMin,
             amountBMin,
-            to
+            to,
+            deadline
         );
     }
 
@@ -454,7 +458,8 @@ contract RouterV2 is ReentrancyGuard {
             liquidity,
             amountTokenMin,
             amountETHMin,
-            to
+            to,
+            deadline
         );
     }
 
@@ -614,7 +619,8 @@ contract RouterV2 is ReentrancyGuard {
             liquidity,
             amountTokenMin,
             amountETHMin,
-            address(this)
+            address(this),
+            deadline
         );
         _safeTransfer(token, to, IERC20(token).balanceOf(address(this)));
         wETH.withdraw(amountETH);
