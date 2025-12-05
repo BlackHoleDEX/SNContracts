@@ -24,7 +24,7 @@ contract BlackGovernor is
         IBlackHoleVotes _ve,
         address _minter
     )
-        L2Governor("Black Governor")
+        L2Governor("Supernova Governor")
         L2GovernorVotes(_ve)
         L2GovernorVotesQuorumFraction(4) // 4%
     {

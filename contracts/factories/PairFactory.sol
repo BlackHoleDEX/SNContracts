@@ -2,36 +2,31 @@
 pragma solidity 0.8.13;
 
 import '../interfaces/IPairFactory.sol';
-import '../interfaces/IPair.sol';
 import '../interfaces/IPairGenerator.sol';
+import {MAX_FEE, MAX_REFERRAL_FEE_CAP} from '../libraries/Constants.sol';
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 contract PairFactory is IPairFactory, OwnableUpgradeable {
 
     bool public isPaused;
-
     uint256 public stableFee;
     uint256 public volatileFee;
-    uint256 public stakingNFTFee;
     uint256 public MAX_REFERRAL_FEE; // 12%
-    uint256 public constant MAX_FEE = 500; // 5%
 
     address public feeManager;
     address public pendingFeeManager;
     address public dibs; // referral fee handler
-    address public stakingFeeHandler; // staking fee handler
     address public pairGenerator;
-    address public genesisManager;
 
     mapping(address => mapping(address => mapping(bool => address))) public getPair;
     address[] public allPairs;
     mapping(address => bool) public isPair;
     mapping(address => uint256) public customFees;
     mapping(address => uint256) public customReferralFees;
-    mapping(address => bool) public isGenesis;
 
     event PairCreated(address indexed token0, address indexed token1, bool stable, address pair, uint);
+    event CustomFeesSet(address indexed pairAddress, uint256 fees);
 
     modifier onlyManager() {
         require(msg.sender == feeManager, "NA");
@@ -41,7 +36,7 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
     mapping(address => bool) public authorizedAccounts;
     modifier onlyAuthorized() {
         require(
-            authorizedAccounts[msg.sender] || msg.sender == feeManager || msg.sender == genesisManager,
+            authorizedAccounts[msg.sender] || msg.sender == feeManager,
             "not manager or authorized"
         );
         _;
@@ -56,7 +51,6 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
         feeManager = msg.sender;
         stableFee = 5; // 0.05%
         volatileFee = 60; // 0.6%
-        stakingNFTFee = 0; // 0% of stable/volatileFee, we can change it later if needed
         MAX_REFERRAL_FEE = 0; // 0%
         pairGenerator = _pairGenerator;
     }
@@ -79,22 +73,13 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
         feeManager = pendingFeeManager;
     }
 
-    function setStakingFees(uint256 _newFee) external onlyManager {
-        require(_newFee <= 3000, "HFE");
-        stakingNFTFee = _newFee;
-    }
-
-    function setStakingFeeAddress(address _feehandler) external onlyManager {
-        require(_feehandler != address(0), "ZA");
-        stakingFeeHandler = _feehandler;
-    }
-
     function setDibs(address _dibs) external onlyManager {
         require(_dibs != address(0), "ZA");
         dibs = _dibs;
     }
 
     function setReferralFee(uint256 _refFee) external onlyManager {
+        require(_refFee <= MAX_REFERRAL_FEE_CAP, "RFE"); // Referral fee exceeds maximum allowed
         MAX_REFERRAL_FEE = _refFee;
     }
 
@@ -112,34 +97,29 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
         require(_fees <= MAX_FEE, "HFE");
         require(isPair[_pairAddress], "INVP");
         customFees[_pairAddress] = _fees;
+        emit CustomFeesSet(_pairAddress, _fees);
     }
 
     function setCustomReferralFee(address _pairAddress, uint256 _refFee) external onlyManager {
+        require(_refFee <= MAX_REFERRAL_FEE_CAP, "RFE"); // Referral fee exceeds maximum allowed
         require(isPair[_pairAddress], "INVP");
         customReferralFees[_pairAddress] = _refFee;
     }
 
     function getFee(address _pairAddress, bool _stable) public view returns (uint256) {
-        if (customFees[_pairAddress] > 0) {
-            return customFees[_pairAddress];
+        uint256 customFee = customFees[_pairAddress];
+        if (customFee > 0) {
+            return customFee;
         }
         return _stable ? stableFee : volatileFee;
     }
 
     function getReferralFee(address _pairAddress) public view returns (uint256) {
-        if (customReferralFees[_pairAddress] > 0) {
-            return customReferralFees[_pairAddress];
+        uint256 customReferralFee = customReferralFees[_pairAddress];
+        if (customReferralFee > 0) {
+            return customReferralFee;
         }
         return MAX_REFERRAL_FEE;
-    }
-
-    function getIsGenesis(address _pairAddress) public view returns (bool) {
-        return isGenesis[_pairAddress];
-    }
-
-    function setIsGenesis(address _pairAddress, bool status) external onlyManager {
-        require(_pairAddress != address(0) && isPair[_pairAddress], "INVP");
-        isGenesis[_pairAddress] = status;
     }
 
     function pairCodeHash() external view returns (bytes32) {
@@ -160,14 +140,6 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
         emit PairCreated(token0, token1, stable, pair, allPairs.length);
     }
 
-    function setGenesisManager(address _genesisManager) external onlyManager {
-        genesisManager = _genesisManager;
-    }
-
-    function setGenesisStatus(address _pair, bool status) external {
-        require(msg.sender == genesisManager || msg.sender == feeManager, "NA");
-        isGenesis[_pair] = status;
-    }
 
     function addAuthorizedAccount(address account) external onlyManager {
         require(account != address(0), "zero address");

@@ -12,11 +12,10 @@ library VotingBalanceLogic {
         mapping(uint => IVotingEscrow.Point[1000000000]) user_point_history; // user -> Point[user_epoch]
     }
 
-    /// @notice Get the current voting power for `_tokenId`
-    /// @dev Adheres to the ERC20 `balanceOf` interface for Aragon compatibility
+    /// @notice Get the historical voting power for `_tokenId` at time `_t`
     /// @param _tokenId NFT for lock
     /// @param _t Epoch time to return voting power at
-    /// @return User voting power
+    /// @return Historical voting power for the NFT at the given time
     function balanceOfNFT(uint _tokenId, uint _t, 
         Data storage VotingBalanceLogicData
         ) external view returns (uint) {
@@ -37,7 +36,7 @@ library VotingBalanceLogic {
                 if (last_point.bias < 0) {
                     last_point.bias = 0;
                 }
-                return uint(int256(last_point.bias));
+                return uint(uint128(last_point.bias));
             }
         }
     }
@@ -48,14 +47,22 @@ library VotingBalanceLogic {
     uint _t,
     Data storage votingBalanceLogicData
     ) internal view returns (uint256){
+        if (votingBalanceLogicData.user_point_history[_tokenId][1].ts > _t) {
+            return 0;
+        }
+        
+        // Handle edge case: if _t is after the last point, return the last index
+        if (votingBalanceLogicData.user_point_history[_tokenId][_epoch].ts <= _t) {
+            return _epoch;
+        }
+        
+        // Binary search for the largest index where userPoint.ts <= _t
         uint lower = 0;
         uint upper = _epoch;
         while (upper > lower) {
             uint center = upper - (upper - lower) / 2; // ceil, avoiding overflow
             IVotingEscrow.Point memory userPoint = votingBalanceLogicData.user_point_history[_tokenId][center];
-            if (userPoint.ts == _t) {
-                return center;
-            } else if (userPoint.ts < _t) {
+            if (userPoint.ts <= _t) {
                 lower = center;
             } else {
                 upper = center - 1;
@@ -64,9 +71,9 @@ library VotingBalanceLogic {
         return lower;
     }
 
-    /// @notice Measure voting power of `_tokenId` at block height `_block`
-    /// @dev Adheres to MiniMe `balanceOfAt` interface: https://github.com/Giveth/minime
-    /// @param _tokenId User's wallet NFT
+    /// @notice Measure voting power of `_tokenId` at a specific block height
+    /// @dev Returns historic voting power for the given NFT at a precise block
+    /// @param _tokenId NFT for lock
     /// @param _block Block to calculate the voting power at
     /// @return Voting power
     function balanceOfAtNFT(uint _tokenId, 
@@ -74,8 +81,6 @@ library VotingBalanceLogic {
         Data storage VotingBalanceLogicData,
         uint epoch
         ) external view returns (uint) {
-        // Copying and pasting totalSupply code because Vyper cannot pass by
-        // reference yet
         assert(_block <= block.number);
 
         // Binary search
@@ -153,10 +158,11 @@ library VotingBalanceLogic {
 
     }
 
-         /// @notice Binary search to estimate timestamp for block number
+    /// @notice Internal binary search to find the epoch index for the given block number
+    /// @dev Finds the epoch index whose point is the latest one at or before the given block
     /// @param _block Block to find
     /// @param max_epoch Don't go beyond this epoch
-    /// @return Approximate timestamp for block
+    /// @return Epoch index associated with (or before) the given block
     function _find_block_epoch(uint _block, 
         uint max_epoch,
         Data storage VotingBalanceLogicData
@@ -214,14 +220,21 @@ library VotingBalanceLogic {
     function getPastGlobalPointIndex(uint _epoch,
         uint _t,
         Data storage VotingBalanceLogicData) internal view returns (uint256){
+        if (VotingBalanceLogicData.point_history[1].ts > _t) {
+            return 0;
+        }
+        
+        // Handle edge case: if _t is after the last point, return the last index
+        if (VotingBalanceLogicData.point_history[_epoch].ts <= _t) {
+            return _epoch;
+        }
+        
         uint lower = 0;
         uint upper = _epoch;
         while (upper > lower) {
             uint center = upper - (upper - lower) / 2; // ceil, avoiding overflow
             IVotingEscrow.Point memory point = VotingBalanceLogicData.point_history[center];
-            if (point.ts == _t) {
-                return center;
-            } else if (point.ts < _t) {
+            if (point.ts <= _t) {
                 lower = center;
             } else {
                 upper = center - 1;

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity 0.8.13;
 
-import "./libraries/Math.sol";
 import "./interfaces/IMinter.sol";
 import "./interfaces/IRewardsDistributor.sol";
-import "./interfaces/IBlack.sol";
+import "./interfaces/ISuperNova.sol";
 import "./interfaces/IGaugeManager.sol";
 import "./interfaces/IVotingEscrow.sol";
+import "./interfaces/IERC20.sol";
 
 import { IBlackGovernor } from "./interfaces/IBlackGovernor.sol";
 
@@ -16,25 +16,23 @@ import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 // codifies the minting rules as per ve(3,3), abstracted from the token to support any token that allows minting
 // 14 increment epochs followed by 52 decrement epochs after which we wil have vote based epochs
 
+// NOTE: Inherits OwnableUpgradeable and maintains `team` variable for protocol administration and future extensibility, even if not all owner functions are currently used.
 contract MinterUpgradeable is IMinter, OwnableUpgradeable {
-    
-    bool public isFirstMint;
 
     uint public teamRate;  //EMISSION that goes to protocol
     uint public constant MAX_TEAM_RATE = 500; // 5%
     uint256 public constant TAIL_START = 67; //TAIL EMISSIONS
     uint256 public tailEmissionRate; 
-    uint256 public constant NUDGE = 1; //delta added in tail emissions rate after voting
-    uint256 public constant MAXIMUM_TAIL_RATE = 100; //maximum tail emissions rate after voting
-    uint256 public constant MINIMUM_TAIL_RATE = 1; //maximum tail emissions rate after voting
-    uint256 public constant MAX_BPS = 10_000; 
-    uint256 public constant WEEKLY_DECAY = 9_900; //for epoch 15 to 66 growth
+
+    uint256 public constant MAX_BPS = 10_000;
+    uint256 public constant WEEKLY_DECAY = 9_900; //for epoch 15 to 66 decay
     uint256 public constant WEEKLY_GROWTH = 10_300; //for epoch 1 to 14 growth
     uint256 public constant PROPOSAL_INCREASE = 10_100; // 1% increment after the 67th epoch based on proposal
-    uint256 public constant PROPOSAL_DECREASE = 9_900; // 1% increment after the 67th epoch based on proposal
+    uint256 public constant PROPOSAL_DECREASE = 9_900; // 1% decrement after the 67th epoch based on proposal
+    address private constant burnTokenAddress = 0x000000000000000000000000000000000000dEaD;
 
     uint public WEEK; // allows minting once per week (reset every Thursday 00:00 UTC)
-    uint public weekly; // represents a starting weekly emission of 2.6M BLACK (BLACK has 18 decimals)
+    uint public weekly; // represents a starting weekly emission of 10M Supernova (Supernova has 18 decimals)
     uint public active_period;
     uint public LOCK;
     uint256 public epochCount;
@@ -43,15 +41,19 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     address public team;
     address public pendingTeam;
     
-    IBlack public _black;
+    ISuperNova public _black;
     IGaugeManager public _gaugeManager;
     IVotingEscrow public _ve;
     IRewardsDistributor public _rewards_distributor;
-    address private burnTokenAddress;
 
     mapping(uint256 => bool) public proposals;
 
     event Mint(address indexed sender, uint weekly, uint circulating_supply, uint circulating_emission);
+    event UpdateTeam(address indexed oldTeam, address indexed newTeam);
+    event AcceptNewTeam(address indexed oldTeam, address indexed newTeam);
+    event TeamRateUpdated(uint256 oldTeamRate, uint256 newTeamRate);
+    event GaugeManagerSet(address indexed oldGaugeManager, address indexed newGaugeManager);
+    event RewardDistributorSet(address indexed oldRewardDistributor, address indexed newRewardDistributor);
 
     constructor() {}
 
@@ -68,16 +70,14 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         teamRate = 500; // 500 bps = 5%
         WEEK = BlackTimeLibrary.WEEK;
         LOCK = BlackTimeLibrary.MAX_LOCK_DURATION;
-        _black = IBlack(IVotingEscrow(__ve).token());
+        _black = ISuperNova(IVotingEscrow(__ve).token());
         _gaugeManager = IGaugeManager(__gaugeManager);
         _ve = IVotingEscrow(__ve);
         _rewards_distributor = IRewardsDistributor(__rewards_distributor);
 
         active_period = ((block.timestamp + (2 * WEEK)) / WEEK) * WEEK;
-        weekly = 10_000_000 * 1e18; // represents a starting weekly emission of 10M BLACK (BLACK has 18 decimals)
-        isFirstMint = true;
+        weekly = 10_000_000 * 10**IERC20(address(_black)).decimals(); // represents a starting weekly[epoch 0] emission of 10M DEXTOKEN
 
-        burnTokenAddress=0x000000000000000000000000000000000000dEaD;
     }
 
     function _initialize(
@@ -86,6 +86,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         uint max // sum amounts / max = % ownership of top protocols, so if initial 20m is distributed, and target is 25% protocol ownership, then max - 4 x 20m = 80m
     ) external {
         require(_initializer == msg.sender);
+        _initializer = address(0);
         if(max > 0){
             _black.mint(address(this), max);
             _black.approve(address(_ve), type(uint).max);
@@ -94,30 +95,38 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
             }
         }
 
-        _initializer = address(0);
         active_period = ((block.timestamp) / WEEK) * WEEK; // allow minter.update_period() to mint new emissions THIS Thursday
     }
 
     function setTeam(address _team) external {
         require(msg.sender == team);
+        address oldTeam = team;
         pendingTeam = _team;
+        emit UpdateTeam(oldTeam, _team);
     }
 
     function acceptTeam() external {
         require(msg.sender == pendingTeam, "not pending team");
+        address oldTeam = team;
         team = pendingTeam;
+        pendingTeam = address(0);
+        emit AcceptNewTeam(oldTeam, team);
     }
 
     function setGaugeManager(address __gaugeManager) external {
         require(__gaugeManager != address(0));
         require(msg.sender == team, "not team");
+        address oldGaugeManager = address(_gaugeManager);
         _gaugeManager = IGaugeManager(__gaugeManager);
+        emit GaugeManagerSet(oldGaugeManager, __gaugeManager);
     }
 
     function setTeamRate(uint _teamRate) external {
         require(msg.sender == team, "not team");
         require(_teamRate <= MAX_TEAM_RATE, "rate too high");
+        uint256 oldTeamRate = teamRate;
         teamRate = _teamRate;
+        emit TeamRateUpdated(oldTeamRate, _teamRate);
     }
 
     // calculate inflation and adjust ve balances accordingly
@@ -146,7 +155,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         else if(_state == IBlackGovernor.ProposalState.Defeated) {
             tailEmissionRate = PROPOSAL_DECREASE;
         } else  {
-            tailEmissionRate = 10000;
+            tailEmissionRate = MAX_BPS;
         }
         proposals[_period] = true;
     }
@@ -211,15 +220,14 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         return (block.timestamp >= _period + WEEK && _initializer == address(0));
     }
 
-    function period() external view returns(uint){
-        return(block.timestamp / WEEK) * WEEK;
-    }
     function setRewardDistributor(address _rewardDistro) external {
         require(msg.sender == team);
+        address oldRewardDistributor = address(_rewards_distributor);
         _rewards_distributor = IRewardsDistributor(_rewardDistro);
+        emit RewardDistributorSet(oldRewardDistributor, _rewardDistro);
     }
 
-    function version() external view returns (string memory version) {
-        version  = "MinterUpgradable v1.1.2";
+    function version() external pure returns (string memory _version) {
+        _version  = "MinterUpgradable v1.0.0";
     }
 }

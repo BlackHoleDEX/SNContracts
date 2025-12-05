@@ -92,6 +92,7 @@ contract RouterHelper is OwnableUpgradeable {
                     amounts[i+1] = 0;
                     priceAfterSwap[i+1] = 0;
                     priceBeforeSwap[i+1] = 0;
+                    break;
                 }
             }
             else{
@@ -104,19 +105,44 @@ contract RouterHelper is OwnableUpgradeable {
                             break;
                         }
                         amounts[i+1] = outAmt;
-                        // Get pair metadata to access decimal information
-                        (uint decimals0, uint decimals1, , , , , ) = IPair(routes[i].pair).metadata();
+                        uint decimals0 = IERC20(routes[i].from).decimals();
+                        uint decimals1 = IERC20(routes[i].to).decimals();
+
+                        if(routes[i].from > routes[i].to) {
+                            (decimals0, decimals1) = (decimals1, decimals0);
+                        }
+
                         (uint beforeReserve0, uint beforeReserve1,) = IPair(routes[i].pair).getReserves();
-                        // Calculate price with proper decimal handling
-                        // Price = (r1 / decimals1) / (r0 / decimals0) * 1e18
-                        // This gives us the price in 18 decimal precision
-                        priceBeforeSwap[i+1] = (beforeReserve1 * 1e18 / decimals1) / (beforeReserve0 / decimals0);
-                        priceAfterSwap[i+1] = (afterReserve1 * 1e18 / decimals1) / (afterReseve0 / decimals0);
+
+                        // Check if this is a stable pair to use appropriate price formula
+                        (, , , , bool stable,,) = IPair(routes[i].pair).metadata();
+
+                        if (stable) {
+                            // Use stable swap price formula for both before and after swap
+                            priceBeforeSwap[i+1] = _calculateStableSwapPrice(beforeReserve0, beforeReserve1, decimals0, decimals1);
+                            priceAfterSwap[i+1] = _calculateStableSwapPrice(afterReseve0, afterReserve1, decimals0, decimals1);
+                        } else {
+                            // Use standard AMM price formula for volatile pairs
+                            // Price = (r1 / decimals1) / (r0 / decimals0) * 1e18
+                            // This gives us the price in 18 decimal precision
+                            if(18 + decimals0 >= decimals1){
+                                priceBeforeSwap[i+1] = (beforeReserve1 * 10**(18 + decimals0 - decimals1)) / (beforeReserve0);
+                                priceAfterSwap[i+1] = (afterReserve1 * 10**(18 + decimals0 - decimals1)) / (afterReseve0);
+                            } else {
+                                priceBeforeSwap[i+1] = (beforeReserve1) / (beforeReserve0 * 10**(decimals1 - decimals0 - 18));
+                                priceAfterSwap[i+1] = (afterReserve1) / (afterReseve0 * 10**(decimals1 - decimals0 - 18));
+                            }
+                        }
                     } catch {
                         amounts[i+1] = 0;
                         priceAfterSwap[i+1] = 0;
+                        break;
                     }
-                } 
+                } else {
+                    amounts[i+1] = 0;
+                    priceAfterSwap[i+1] = 0;
+                    break;
+                }
             }
         }
     }
@@ -135,10 +161,12 @@ contract RouterHelper is OwnableUpgradeable {
         (pairSwapMetaData.reserveA, pairSwapMetaData.reserveB) = tokenIn == pairSwapMetaData.token0 ? (pairSwapMetaData.reserve0, pairSwapMetaData.reserve1) : (pairSwapMetaData.reserve1, pairSwapMetaData.reserve0);
         (pairSwapMetaData.decimalsA, pairSwapMetaData.decimalsB) = tokenIn == pairSwapMetaData.token0 ? (pairSwapMetaData.decimals0, pairSwapMetaData.decimals1) : (pairSwapMetaData.decimals1, pairSwapMetaData.decimals0);
 
-        pairSwapMetaData.balanceA += (amountIn - (amountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000));
+        uint actualAmountIn = amountIn + pairSwapMetaData.balanceA - pairSwapMetaData.reserveA;
+        uint feeAmount = actualAmountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000;
+        pairSwapMetaData.balanceA = pairSwapMetaData.balanceA + amountIn - feeAmount;
         pairSwapMetaData.balanceB -= amountOut;
 
-        uint afterReserveA = pairSwapMetaData.reserveA + (amountIn - (amountIn * IPairFactory(factory).getFee(pair, pairSwapMetaData.stable) / 10000));
+        uint afterReserveA = pairSwapMetaData.reserveA + actualAmountIn - feeAmount;
         uint afterReserveB = pairSwapMetaData.reserveB - amountOut;
 
         uint afterReserve0 = tokenIn == pairSwapMetaData.token0 ? afterReserveA : afterReserveB;
@@ -162,6 +190,37 @@ contract RouterHelper is OwnableUpgradeable {
         }
     }
 
+    function _calculateStableSwapPrice(
+        uint x,
+        uint y,
+        uint decimals0,
+        uint decimals1
+    ) internal pure returns (uint) {
+        // Normalize reserves to 18 decimals
+        uint _x = (x * 1e18) / 10**decimals0;
+        uint _y = (y * 1e18) / 10**decimals1;
+
+        if (_x == 0 || _y == 0) return 0;
+
+        // Precompute squared terms, scaled down
+        uint r0Sq = (_x * _x) / 1e18;
+        uint r1Sq = (_y * _y) / 1e18;
+
+        // Numerator and denominator coefficients (scaled terms)
+        uint numeratorCoeff = (3 * r0Sq + r1Sq);
+        uint denominatorCoeff = (r0Sq + 3 * r1Sq);
+
+        // Now compute numerator and denominator carefully, dividing early
+        uint numerator = (_y * numeratorCoeff) / 1e18;  // scaled down
+        uint denominator = (_x * denominatorCoeff) / 1e18;
+
+        if (denominator == 0) return 0;
+
+        // Final scale to 1e18 precision
+        return (numerator * 1e18) / denominator;
+    }
+
+
     // performs chained getAmountOut calculations on any number of pairs
     function getAmountOut(uint amountIn, address tokenIn, address tokenOut) public view returns (uint amount, bool stable) {
         address pairStable = pairFor(tokenIn, tokenOut, true);
@@ -171,7 +230,7 @@ contract RouterHelper is OwnableUpgradeable {
         uint amountVolatile;
         uint amountOut;
 
-        if (IPairFactory(factory).isPair(pairStable) && !IPairFactory(factory).isGenesis(pairStable)) {
+        if (IPairFactory(factory).isPair(pairStable)) {
             // amountStable = IBaseV1Pair(pairStable).getAmountOut(amountIn, tokenIn);
             
             try IPair(pairStable).getAmountOut(amountIn, tokenIn) returns (uint outAmt) {
@@ -181,7 +240,7 @@ contract RouterHelper is OwnableUpgradeable {
             }
         }
 
-        if (IPairFactory(factory).isPair(pairVolatile) && !IPairFactory(factory).isGenesis(pairVolatile)) {
+        if (IPairFactory(factory).isPair(pairVolatile)) {
             //amountVolatile = IBaseV1Pair(pairVolatile).getAmountOut(amountIn, tokenIn);
             
             try IPair(pairVolatile).getAmountOut(amountIn, tokenIn) returns (uint outAmt) {
@@ -199,6 +258,51 @@ contract RouterHelper is OwnableUpgradeable {
 
         
         (bool swapPossible,,) = _swapRatio(amountIn, tokenIn, pair, amountOut);
+
+        if(swapPossible){
+            return (amountOut, stable);
+        }
+
+        return (0, true);
+    }
+
+    // performs chained getAmountOut calculations on any number of pairs
+    function getAmountOutForFeeOnTransfer(uint amountIn, address tokenIn, address tokenOut) public view returns (uint amount, bool stable) {
+        address pairStable = pairFor(tokenIn, tokenOut, true);
+        address pairVolatile = pairFor(tokenIn, tokenOut, false);
+        address pair;
+        uint amountStable;
+        uint amountVolatile;
+        uint amountOut;
+
+        if (IPairFactory(factory).isPair(pairStable)) {
+            // amountStable = IBaseV1Pair(pairStable).getAmountOut(amountIn, tokenIn);
+            
+            try IPair(pairStable).getAmountOut(amountIn, tokenIn) returns (uint outAmt) {
+                amountStable = outAmt;
+            } catch {
+                amountStable = 0;
+            }
+        }
+
+        if (IPairFactory(factory).isPair(pairVolatile)) {
+            //amountVolatile = IBaseV1Pair(pairVolatile).getAmountOut(amountIn, tokenIn);
+            
+            try IPair(pairVolatile).getAmountOut(amountIn, tokenIn) returns (uint outAmt) {
+                amountVolatile = outAmt;
+            } catch {
+                amountVolatile = 0;
+            }
+        }
+
+        (amountOut, stable, pair) = amountStable > amountVolatile ? (amountStable, true, pairStable) : (amountVolatile, false, pairVolatile);
+
+        if (pair == address(0)) {
+            return (0, true);
+        }
+
+        
+        (bool swapPossible,,) = _swapRatio(0, tokenIn, pair, amountOut);
 
         if(swapPossible){
             return (amountOut, stable);

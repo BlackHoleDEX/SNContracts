@@ -18,5 +18,9 @@ interface IVoter {
     function getEpochGovernor() external view returns (address);
     function setEpochGovernor(address _epochGovernor) external;
     function reset(uint256 _tokenId) external;
-    function totalWeight() external returns (uint256);
+    function totalWeight() external view returns (uint256);
+    function getEpochTotalWeight(uint256 epoch) external view returns (uint256);
+    function getEpochPoolWeight(uint256 epoch, address pool) external view returns (uint256);
+    function checkpointPoolWeightsForNextEpoch( address pool) external;
+    function checkpointTotalWeightForNextEpoch() external;
 }

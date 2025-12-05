@@ -14,7 +14,6 @@ interface IBribeAPI {
     function rewardsListLength() external view returns (uint);
     function supplyNumCheckpoints() external view returns (uint);
     //function getEpochStart(uint timestamp) external pure returns (uint);
-    function getEpochStart() external pure returns (uint);
     function getNextEpochStart() external pure returns (uint);
     function getPriorSupplyIndex(uint timestamp) external view returns (uint);
     function bribeTokens(uint index) external view returns (address);

@@ -55,8 +55,6 @@ interface IVotingEscrow {
     function totalSupplyAtT(uint256 _t) external view returns (uint);
     function supply() external view returns (uint);
 
-    function avm() external view returns (address);
-
     function decimals() external view returns(uint8);
 
 
@@ -67,4 +65,5 @@ interface IVotingEscrow {
     function smNFTBalance() external view returns (uint);
     function calculate_sm_nft_bonus(uint amount) external view returns (uint);
     function calculate_original_sm_nft_amount(uint amount) external view returns (uint);
+    function ownerToNFTokenCountFn(address owner) external view returns (uint);
 }

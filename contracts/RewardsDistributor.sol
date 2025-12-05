@@ -1,22 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity 0.8.13;
 
-import './libraries/Math.sol';
 import './interfaces/IERC20.sol';
 import './interfaces/IRewardsDistributor.sol';
-import './AVM/interfaces/IAutoVotingEscrowManager.sol';
 import './interfaces/IVotingEscrow.sol';
+import "@openzeppelin/contracts/access/Ownable.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 
-/*
-
-@title Curve Fee Distribution modified for ve(3,3) emissions
-@author Curve Finance, andrecronje
-@license MIT
-
-*/
-
-contract RewardsDistributor is IRewardsDistributor {
+contract RewardsDistributor is IRewardsDistributor, Ownable {
 
     event CheckpointToken(
         uint time,
@@ -30,45 +21,32 @@ contract RewardsDistributor is IRewardsDistributor {
         uint max_epoch
     );
 
-    uint256 public WEEK;
+    event SetDepositor(address indexed old, address indexed latest);
+
+    uint256 public immutable WEEK;
 
     uint public start_time;
-    uint public time_cursor;
     mapping(uint => uint) public time_cursor_of;
 
     uint public last_token_time;
     uint[1000000000000000] public tokens_per_week;
     uint public token_last_balance;
-    uint[1000000000000000] public ve_supply;
 
-    address public owner;
-    address public voting_escrow;
-    address public token;
+    address public immutable voting_escrow;
+    address public immutable token;
     address public depositor;
 
-    IAutoVotingEscrowManager public avm;
+    uint8 public constant MAX_EPOCHS = 20;
 
     constructor(address _voting_escrow) {
         WEEK = BlackTimeLibrary.WEEK;
         uint _t = block.timestamp / WEEK * WEEK;
         start_time = _t;
         last_token_time = _t;
-        time_cursor = _t;
         address _token = IVotingEscrow(_voting_escrow).token();
         token = _token;
         voting_escrow = _voting_escrow;
-        depositor = msg.sender; //0x86069feb223ee303085a1a505892c9d4bdbee996
-        owner = msg.sender;
         require(IERC20(_token).approve(_voting_escrow, type(uint).max), "approval failed");
-    }
-
-    modifier onlyOwner {
-        require(msg.sender == owner, 'not owner');
-        _;
-    }
-
-    function timestamp() external view returns (uint) {
-        return block.timestamp / WEEK * WEEK;
     }
 
     function _checkpoint_token() internal {
@@ -79,50 +57,36 @@ contract RewardsDistributor is IRewardsDistributor {
         uint t = last_token_time;
         uint since_last = block.timestamp - t;
         last_token_time = block.timestamp;
-        uint this_week = t / WEEK * WEEK;
-        uint next_week = 0;
+        if(to_distribute > 0){
+            uint this_week = t / WEEK * WEEK;
+            uint next_week = 0;
 
-        for (uint i = 0; i < 20; i++) {
-            next_week = this_week + WEEK;
-            if (block.timestamp < next_week) {
-                if (since_last == 0 && block.timestamp == t) {
-                    tokens_per_week[this_week] += to_distribute;
+            for (uint i = 0; i < 20; i++) {
+                next_week = this_week + WEEK;
+                if (block.timestamp < next_week) {
+                    if (since_last == 0 && block.timestamp == t) {
+                        tokens_per_week[this_week] += to_distribute;
+                    } else {
+                        tokens_per_week[this_week] += to_distribute * (block.timestamp - t) / since_last;
+                    }
+                    break;
                 } else {
-                    tokens_per_week[this_week] += to_distribute * (block.timestamp - t) / since_last;
+                    if (since_last == 0 && next_week == t) {
+                        tokens_per_week[this_week] += to_distribute;
+                    } else {
+                        tokens_per_week[this_week] += to_distribute * (next_week - t) / since_last;
+                    }
                 }
-                break;
-            } else {
-                if (since_last == 0 && next_week == t) {
-                    tokens_per_week[this_week] += to_distribute;
-                } else {
-                    tokens_per_week[this_week] += to_distribute * (next_week - t) / since_last;
-                }
+                t = next_week;
+                this_week = next_week;
             }
-            t = next_week;
-            this_week = next_week;
         }
         emit CheckpointToken(block.timestamp, to_distribute);
     }
 
     function checkpoint_token() external {
-        assert(msg.sender == depositor);
+        require(msg.sender == depositor, "NOT_DEPOSITOR");
         _checkpoint_token();
-    }
-
-    function _find_timestamp_user_epoch(address ve, uint tokenId, uint _timestamp, uint max_user_epoch) internal view returns (uint) {
-        uint _min = 0;
-        uint _max = max_user_epoch;
-        for (uint i = 0; i < 128; i++) {
-            if (_min >= _max) break;
-            uint _mid = (_min + _max + 2) / 2;
-            IVotingEscrow.Point memory pt = IVotingEscrow(ve).user_point_history(tokenId, _mid);
-            if (pt.ts <= _timestamp) {
-                _min = _mid;
-            } else {
-                _max = _mid -1;
-            }
-        }
-        return _min;
     }
 
     function _claim(uint _tokenId, address ve, uint _last_token_time) internal returns (uint) {
@@ -139,12 +103,12 @@ contract RewardsDistributor is IRewardsDistributor {
             week_cursor = user_point.ts / WEEK * WEEK;
         }
 
-        if (week_cursor >= last_token_time) return 0;
+        if (week_cursor >= _last_token_time) return 0;
         if (week_cursor < _start_time) week_cursor = _start_time;
 
         uint supply;
 
-        for (uint i = 0; i < 50; i++) {
+        for (uint i = 0; i < MAX_EPOCHS; i++) {
             if (week_cursor >= _last_token_time) break;
             uint balance_of = IVotingEscrow(ve).balanceOfNFTAt(_tokenId, week_cursor + WEEK - 1);
             supply = IVotingEscrow(ve).totalSupplyAtT(week_cursor + WEEK - 1);
@@ -173,11 +137,11 @@ contract RewardsDistributor is IRewardsDistributor {
             week_cursor = user_point.ts / WEEK * WEEK;
         }
 
-        if (week_cursor >= last_token_time) return 0;
+        if (week_cursor >= _last_token_time) return 0;
         if (week_cursor < _start_time) week_cursor = _start_time;
         uint supply;
 
-        for (uint i = 0; i < 50; i++) {
+        for (uint i = 0; i < MAX_EPOCHS; i++) {
             if (week_cursor >= _last_token_time) break;
             uint balance_of = IVotingEscrow(ve).balanceOfNFTAt(_tokenId, week_cursor + WEEK - 1);
             supply = IVotingEscrow(ve).totalSupplyAtT(week_cursor + WEEK - 1);
@@ -204,9 +168,6 @@ contract RewardsDistributor is IRewardsDistributor {
             // If lock has expired and is not permanent, transfer tokens directly
             if (_locked.end < block.timestamp && !_locked.isPermanent) {
                 address _nftOwner = IVotingEscrow(voting_escrow).ownerOf(_tokenId);
-                if (address(avm) != address(0) && avm.tokenIdToAVMId(_tokenId) != 0) {
-                    _nftOwner = avm.getOriginalOwner(_tokenId);
-                }
                 IERC20(token).transfer(_nftOwner, amount);
             } else {
                 IVotingEscrow(voting_escrow).deposit_for(_tokenId, amount);
@@ -225,16 +186,13 @@ contract RewardsDistributor is IRewardsDistributor {
 
         for (uint i = 0; i < tokenIdsLen; i++) {
             uint _tokenId = _tokenIds[i];
-            if (_tokenId == 0) break;
+            require(_tokenId != 0, "INVALID_TOKEN_ID");
             uint amount = _claim(_tokenId, _voting_escrow, _last_token_time);
             if (amount != 0) {
                 // if locked.end then send directly
                 IVotingEscrow.LockedBalance memory _locked = IVotingEscrow(_voting_escrow).locked(_tokenId);
                 if(_locked.end < block.timestamp && !_locked.isPermanent){
                     address _nftOwner = IVotingEscrow(_voting_escrow).ownerOf(_tokenId);
-                    if (address(avm) != address(0) && avm.tokenIdToAVMId(_tokenId) != 0) {
-                        _nftOwner = avm.getOriginalOwner(_tokenId);
-                    }
                     IERC20(token).transfer(_nftOwner, amount);
                 } else {
                     IVotingEscrow(_voting_escrow).deposit_for(_tokenId, amount);
@@ -249,25 +207,14 @@ contract RewardsDistributor is IRewardsDistributor {
         return true;
     }
 
-    function setDepositor(address _depositor) external {
-        require(msg.sender == owner);
+    function setDepositor(address _depositor) external onlyOwner {
+        emit SetDepositor(depositor, _depositor);
         depositor = _depositor;
     }
 
-    function setOwner(address _owner) external {
-        require(msg.sender == owner);
-        owner = _owner;
-    }
-
-    function withdrawERC20(address _token) external {
-        require(msg.sender == owner);
+    function withdrawERC20(address _token) external onlyOwner {
         require(_token != address(0));
         uint256 _balance = IERC20(_token).balanceOf(address(this));
         IERC20(_token).transfer(msg.sender, _balance);
-    }
-
-    function setAVM(address _avm) external onlyOwner {
-        require(_avm != address(0), "ZA");
-        avm = IAutoVotingEscrowManager(_avm);
     }
 }
