@@ -10,8 +10,9 @@ import './interfaces/IPair.sol';
 import './interfaces/IBribe.sol';
 import "./libraries/Math.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
+import './interfaces/IGauge.sol';
 
-contract GaugeV2 is ReentrancyGuard, Ownable {
+contract GaugeV2 is ReentrancyGuard, Ownable, IGauge {
 
     using SafeERC20 for IERC20;
 

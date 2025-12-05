@@ -19,7 +19,6 @@ contract Pair is IPair {
     string public symbol;
     uint8 public constant decimals = 18;
 
-    // Used to denote stable or volatile pair, not immutable since construction happens in the initialize method for CREATE2 deterministic addresses
     bool public immutable stable;
 
     uint public totalSupply = 0;
@@ -27,8 +26,6 @@ contract Pair is IPair {
     mapping(address => mapping (address => uint)) public allowance;
     mapping(address => uint) public balanceOf;
 
-    bytes32 internal DOMAIN_SEPARATOR;
-    // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
     bytes32 internal constant PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
     mapping(address => uint) public nonces;
 
@@ -37,7 +34,7 @@ contract Pair is IPair {
     address public immutable token0;
     address public immutable token1;
     address public immutable fees;
-    address immutable factory;
+    address public immutable factory;
 
     // Structure to capture time period obervations every 30 minutes, used for local oracles
     struct Observation {
@@ -257,7 +254,6 @@ contract Pair is IPair {
         // if time has elapsed since the last update on the pair, mock the accumulated price values
         (uint _reserve0, uint _reserve1, uint _blockTimestampLast) = getReserves();
         if (_blockTimestampLast != blockTimestamp) {
-            // subtraction overflow is desired
             uint timeElapsed = blockTimestamp - _blockTimestampLast;
             reserve0Cumulative += _reserve0 * timeElapsed;
             reserve1Cumulative += _reserve1 * timeElapsed;
@@ -278,7 +274,7 @@ contract Pair is IPair {
         amountOut = _getAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
     }
 
-    // as per `current`, however allows user configured granularity, up to the full window size
+    // Similar in purpose to `current`, but more secure as it averages sampled prices over a user-defined granularity (minimum 1, up to the full window size)
     function quote(address tokenIn, uint amountIn, uint granularity) external view returns (uint amountOut) {
         uint [] memory _prices = sample(tokenIn, amountIn, granularity, 1);
         uint priceAverageCumulative;
@@ -324,7 +320,7 @@ contract Pair is IPair {
         uint _amount0 = _balance0 - _reserve0;
         uint _amount1 = _balance1 - _reserve1;
 
-        uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
+        uint _totalSupply = totalSupply;
         if (_totalSupply == 0) {
             // Calculate initial liquidity (includes MINIMUM_LIQUIDITY)
             uint totalLiquidity = Math.sqrt(_amount0 * _amount1);
@@ -370,9 +366,8 @@ contract Pair is IPair {
     // standard uniswap v2 implementation
     function burn(address to) external lock returns (uint amount0, uint amount1) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        (address _token0, address _token1) = (token0, token1);
-        uint _balance0 = IERC20(_token0).balanceOf(address(this));
-        uint _balance1 = IERC20(_token1).balanceOf(address(this));
+        uint _balance0 = IERC20(token0).balanceOf(address(this));
+        uint _balance1 = IERC20(token1).balanceOf(address(this));
         uint _liquidity = balanceOf[address(this)];
 
         uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
@@ -380,10 +375,10 @@ contract Pair is IPair {
         amount1 = _liquidity * _balance1 / _totalSupply; // using balances ensures pro-rata distribution
         require(amount0 > 0 && amount1 > 0, 'ILB'); // Pair: INSUFFICIENT_LIQUIDITY_BURNED
         _burn(address(this), _liquidity);
-        _safeTransfer(_token0, to, amount0);
-        _safeTransfer(_token1, to, amount1);
-        _balance0 = IERC20(_token0).balanceOf(address(this));
-        _balance1 = IERC20(_token1).balanceOf(address(this));
+        _safeTransfer(token0, to, amount0);
+        _safeTransfer(token1, to, amount1);
+        _balance0 = IERC20(token0).balanceOf(address(this));
+        _balance1 = IERC20(token1).balanceOf(address(this));
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
         emit Burn(msg.sender, amount0, amount1, to);
@@ -414,8 +409,9 @@ contract Pair is IPair {
 
         { // scope for reserve{0,1}Adjusted, avoids stack too deep errors
         (address _token0, address _token1) = (token0, token1);
-        if (amount0In > 0) _update0(amount0In * IPairFactory(factory).getFee(address(this), stable) / 10000); // accrue fees for token0 and move them out of pool
-        if (amount1In > 0) _update1(amount1In * IPairFactory(factory).getFee(address(this), stable) / 10000); // accrue fees for token1 and move them out of pool
+        uint256 pairFee = IPairFactory(factory).getFee(address(this), stable);
+        if (amount0In > 0) _update0(amount0In * pairFee / 10000); // accrue fees for token0 and move them out of pool
+        if (amount1In > 0) _update1(amount1In * pairFee / 10000); // accrue fees for token1 and move them out of pool
         _balance0 = IERC20(_token0).balanceOf(address(this)); // since we removed tokens, we need to reconfirm balances, can also simply use previous balance - amountIn/ 10000, but doing balanceOf again as safety check
         _balance1 = IERC20(_token1).balanceOf(address(this));
         // The curve, either x3y+y3x for stable pools, or x*y for volatile pools
@@ -429,8 +425,8 @@ contract Pair is IPair {
     // force balances to match reserves
     function skim(address to) external lock {
         (address _token0, address _token1) = (token0, token1);
-        _safeTransfer(_token0, to, IERC20(_token0).balanceOf(address(this)) - (reserve0));
-        _safeTransfer(_token1, to, IERC20(_token1).balanceOf(address(this)) - (reserve1));
+        _safeTransfer(_token0, to, IERC20(_token0).balanceOf(address(this)) - reserve0);
+        _safeTransfer(_token1, to, IERC20(_token1).balanceOf(address(this)) - reserve1);
     }
 
     // force reserves to match balances
@@ -510,11 +506,11 @@ contract Pair is IPair {
         emit Transfer(address(0), dst, amount);
     }
 
-    function _burn(address dst, uint amount) internal {
-        _updateFor(dst);
+    function _burn(address src, uint amount) internal {
+        _updateFor(src);
         totalSupply -= amount;
-        balanceOf[dst] -= amount;
-        emit Transfer(dst, address(0), amount);
+        balanceOf[src] -= amount;
+        emit Transfer(src, address(0), amount);
     }
 
     function approve(address spender, uint amount) external returns (bool) {
@@ -526,7 +522,7 @@ contract Pair is IPair {
 
     function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external {
         require(deadline >= block.timestamp, 'EXP');
-        DOMAIN_SEPARATOR = keccak256(
+        bytes32 DOMAIN_SEPARATOR = keccak256(
             abi.encode(
                 keccak256('EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)'),
                 keccak256(bytes(name)),
@@ -581,15 +577,8 @@ contract Pair is IPair {
 
     function _safeTransfer(address token,address to,uint256 value) internal {
         require(token.code.length > 0, "CODELEN");
-        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.transfer.selector, to, value));
+        (bool success, bytes memory data) = token.call(abi.encodeCall(IERC20.transfer, (to, value)));
         require(success && (data.length == 0 || abi.decode(data, (bool))), "IST");
-    }
-
-    function _safeApprove(address token,address spender,uint256 value) internal {
-        require(token.code.length > 0, "CODELEN");
-        require((value == 0) || (IERC20(token).allowance(address(this), spender) == 0),"INAP");
-        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.approve.selector, spender, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "ISA");
     }
 
     function _getMinimumLiquidity(uint amount0, uint amount1) internal view returns (uint) {
@@ -612,7 +601,7 @@ contract Pair is IPair {
 
         uint minLiquidity0 = (decimals0 * totalLiquidity) / (1e4 * amount0);
         uint minLiquidity1 = (decimals1 * totalLiquidity) / (1e4 * amount1);
-        //  
+        //
 
         // Use the maximum of the two requirements
         return Math.max(minLiquidity0, minLiquidity1);

@@ -202,7 +202,7 @@ contract AlgebraPoolAPI is Initializable {
 
         {
             if(address(_gauge) != address(0)){
-                try _gauge.totalSupply() returns (uint256 supply) {
+                try _gauge.totalActiveSupply() returns (uint256 supply) {
                     info.gauge_total_supply = supply;
                 } catch {
                     // If the call fails (e.g., gauge is not a standard ERC20 or reverts),

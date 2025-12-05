@@ -23,30 +23,29 @@ import '../interfaces/IBribe.sol';
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 import {IncentiveId} from '@cryptoalgebra/integral-farming/contracts/libraries/IncentiveId.sol';
 import {REFERRAL_FEE_DENOMINATOR} from '../libraries/Constants.sol';
+import '../interfaces/IGaugeCL.sol';
 
-contract GaugeCL is ReentrancyGuard, Ownable {
+contract GaugeCL is ReentrancyGuard, Ownable, IGaugeCL {
 
     using SafeERC20 for IERC20;
     
     IERC20 public immutable rewardToken;
     IERC20 public immutable bonusRewardToken;
-    address public VE;
-    address public DISTRIBUTION;
-    address public internal_bribe;
-    address public external_bribe;
+    address public immutable VE;
+    address public immutable DISTRIBUTION;
+    address public immutable internal_bribe;
+    address public immutable external_bribe;
 
-    uint256 public DURATION;
+    uint256 public immutable DURATION;
     uint256 internal _periodFinish;
     uint256 public rewardRate;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
-    IFarmingCenter public farmingCenter;
-    IGaugeManager.FarmingParam farmingParam;
-    IAlgebraEternalFarming public algebraEternalFarming;
-    IAlgebraPool public algebraPool;
-    address public poolAddress;
-    IAlgebraCustomCommunityVault public communityVault;
-    INonfungiblePositionManager public nonfungiblePositionManager;
+    IFarmingCenter public immutable farmingCenter;
+    IAlgebraEternalFarming public immutable algebraEternalFarming;
+    IAlgebraPool public immutable algebraPool;
+    address public immutable poolAddress;
+    INonfungiblePositionManager public immutable nonfungiblePositionManager;
 
 
     bool public emergency;
@@ -58,8 +57,8 @@ contract GaugeCL is ReentrancyGuard, Ownable {
     event Withdraw(address indexed user, uint256 amount);
     event Harvest(address indexed user, uint256 reward);
     event ClaimFees(address indexed from, uint256 claimed0, uint256 claimed1);
-    event EmergencyActivated(address indexed gauge, uint256 timestamp);
-    event EmergencyDeactivated(address indexed gauge, uint256 timestamp);
+    event EmergencyActivated();
+    event EmergencyDeactivated();
 
     constructor(address _rewardToken, address _ve, address _pool, address _distribution, address _internal_bribe, 
         address _external_bribe, IGaugeManager.FarmingParam memory _farmingParam, address _bonusRewardToken, address _factory) {
@@ -74,40 +73,39 @@ contract GaugeCL is ReentrancyGuard, Ownable {
 
         internal_bribe = _internal_bribe;       // lp fees goes here
         external_bribe = _external_bribe;       // bribe fees goes here
-        farmingParam = _farmingParam;
-        farmingCenter = IFarmingCenter(farmingParam.farmingCenter);
-        communityVault = IAlgebraCustomCommunityVault(algebraPool.communityVault());
-        algebraEternalFarming = IAlgebraEternalFarming(farmingParam.algebraEternalFarming);
-        nonfungiblePositionManager = INonfungiblePositionManager(farmingParam.nfpm);
+        farmingCenter = IFarmingCenter(_farmingParam.farmingCenter);
+        algebraEternalFarming = IAlgebraEternalFarming(_farmingParam.algebraEternalFarming);
+        nonfungiblePositionManager = INonfungiblePositionManager(_farmingParam.nfpm);
         emergency = false;
     }
 
     modifier onlyDistribution() {
-        require(msg.sender == DISTRIBUTION, "Caller is not RewardsDistribution contract");
+        require(msg.sender == DISTRIBUTION, "NA");
         _;
     }
 
     modifier isNotEmergency() {
-        require(emergency == false, "emergency");
+        require(!emergency, "emergency");
         _;
     }
 
     function activateEmergencyMode() external onlyOwner {
-        require(emergency == false, "emergency");
+        require(!emergency, "emergency");
         emergency = true;
-        emit EmergencyActivated(address(this), block.timestamp);
+        emit EmergencyActivated();
     }
 
     function stopEmergencyMode() external onlyOwner {
-
-        require(emergency == true,"emergency");
-
+        require(emergency, "emergency");
         emergency = false;
-        emit EmergencyDeactivated(address(this), block.timestamp);
+        emit EmergencyDeactivated();
     }
 
     function balanceOf(uint256 tokenId) external view returns (uint256) {
-        (,,,,,,,uint128 liquidity,,,,) = nonfungiblePositionManager.positions(tokenId);
+        (IERC20Minimal rewardTokenAdd, IERC20Minimal bonusRewardTokenAdd, IAlgebraPool pool, uint256 nonce) = 
+                algebraEternalFarming.incentiveKeys(poolAddress);
+        IncentiveKey memory incentivekey = IncentiveKey(rewardTokenAdd, bonusRewardTokenAdd, pool, nonce);
+        (uint128 liquidity,,,,) = algebraEternalFarming.farms(tokenId, IncentiveId.compute(incentivekey));
         return liquidity;
     }
 
@@ -116,6 +114,7 @@ contract GaugeCL is ReentrancyGuard, Ownable {
         (IERC20Minimal rewardTokenAdd, IERC20Minimal bonusRewardTokenAdd, IAlgebraPool pool, uint256 nonce) = 
                 algebraEternalFarming.incentiveKeys(poolAddress);
         IncentiveKey memory incentivekey = IncentiveKey(rewardTokenAdd, bonusRewardTokenAdd, pool, nonce);
+        /// @notice reward amounts can be outdated by using getRewardInfo, actual amounts could be obtained via static call of `collectRewards` in FarmingCenter
         (reward, bonusReward) = IAlgebraEternalFarmingCustom(address(algebraEternalFarming)).getRewardInfo(incentivekey, tokenId);
         return (reward, bonusReward);
     }
@@ -123,7 +122,7 @@ contract GaugeCL is ReentrancyGuard, Ownable {
     function deposit(uint256 tokenId) external nonReentrant isNotEmergency {
         require(msg.sender == nonfungiblePositionManager.ownerOf(tokenId));
         
-        nonfungiblePositionManager.approveForFarming(tokenId, true, farmingParam.farmingCenter);
+        nonfungiblePositionManager.approveForFarming(tokenId, true, address(farmingCenter));
 
         (IERC20Minimal rewardTokenAdd, IERC20Minimal bonusRewardTokenAdd, IAlgebraPool pool, uint256 nonce) = 
                 algebraEternalFarming.incentiveKeys(poolAddress);
@@ -162,8 +161,8 @@ contract GaugeCL is ReentrancyGuard, Ownable {
         (,,address virtualPoolAddress,,,) = algebraEternalFarming.incentives(IncentiveId.compute(incentivekey));
         (,uint128 bonusRewardRate) = IAlgebraEternalVirtualPool(virtualPoolAddress).rewardRates();
         
-        rewardToken.safeTransferFrom(DISTRIBUTION, address(this), reward);
-        IERC20(token).safeApprove(farmingParam.algebraEternalFarming, reward);
+        rewardToken.safeTransferFrom(msg.sender, address(this), reward);
+        IERC20(token).forceApprove(address(algebraEternalFarming), reward);
         // transfer emission Reward to Algebra Virtual Pool
         algebraEternalFarming.addRewards(incentivekey, uint128(reward), 0);
         emit RewardAdded(reward);
@@ -185,7 +184,7 @@ contract GaugeCL is ReentrancyGuard, Ownable {
     function _claimFees() internal returns (uint256 claimed0, uint256 claimed1) {
         address _token0 = algebraPool.token0();
         address _token1 = algebraPool.token1();
-        // Fetch fee from the whole epoch which just eneded and transfer it to internal Bribe address.
+        // Fetch fee from the whole epoch which just ended and transfer it to internal Bribe address.
         claimed0 = IERC20(_token0).balanceOf(address(this));
         claimed1 = IERC20(_token1).balanceOf(address(this));
 
@@ -199,26 +198,21 @@ contract GaugeCL is ReentrancyGuard, Ownable {
 
             if (_dibsFeeToken0 > 0) {
                 _safeTransfer(_token0, dibs, _dibsFeeToken0); // Transfer dibs fees
-                claimed0 -= _dibsFeeToken0;
+                claimed0 = claimed0 - _dibsFeeToken0;
             }
 
             if (_dibsFeeToken1 > 0) {
                 _safeTransfer(_token1, dibs, _dibsFeeToken1); // Transfer dibs fees
-                claimed1 -= _dibsFeeToken1;
-            }   
+                claimed1 =  claimed1 - _dibsFeeToken1;
+            }
 
-            uint256 _fees0 = claimed0;
-            uint256 _fees1 = claimed1;
-
-            if (_fees0  > 0) {
-                IERC20(_token0).safeApprove(internal_bribe, 0);
-                IERC20(_token0).safeApprove(internal_bribe, _fees0);
-                IBribe(internal_bribe).notifyRewardAmount(_token0, _fees0);
+            if (claimed0  > 0) {
+                IERC20(_token0).forceApprove(internal_bribe, claimed0);
+                IBribe(internal_bribe).notifyRewardAmount(_token0, claimed0);
             } 
-            if (_fees1  > 0) {
-                IERC20(_token1).safeApprove(internal_bribe, 0);
-                IERC20(_token1).safeApprove(internal_bribe, _fees1);
-                IBribe(internal_bribe).notifyRewardAmount(_token1, _fees1);
+            if (claimed1  > 0) {
+                IERC20(_token1).forceApprove(internal_bribe, claimed1);
+                IBribe(internal_bribe).notifyRewardAmount(_token1, claimed1);
             } 
             emit ClaimFees(msg.sender, claimed0, claimed1);
         }
@@ -231,12 +225,12 @@ contract GaugeCL is ReentrancyGuard, Ownable {
 
     function _safeTransfer(address token,address to,uint256 value) internal {
         require(token.code.length > 0);
-        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.transfer.selector, to, value));
+        (bool success, bytes memory data) = token.call(abi.encodeCall(IERC20.transfer, (to, value)));
         require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 
     function stakedFees() external view returns (uint256 totalFeeToken0, uint256 totalFeeToken1) {
-        // Balance of token1/token1 at Gauge Address and AlgebraCommunityVault address.
+        // Balance of token0/token1 at Gauge Address and AlgebraCommunityVault address.
         
         uint256 gaugeAccruedFeeToken0 = IERC20(algebraPool.token0()).balanceOf(address(this));
         uint256 gaugeAccruedFeeToken1 = IERC20(algebraPool.token1()).balanceOf(address(this));
@@ -256,23 +250,23 @@ contract GaugeCL is ReentrancyGuard, Ownable {
     }
 
     function getCommunityVaultAccruedFee() internal view returns (uint256 communityVaultAccruedFeeToken0, uint256 communityVaultAccruedFeeToken1) {
-        address communityVault = algebraPool.communityVault();
-        communityVaultAccruedFeeToken0 = IERC20(algebraPool.token0()).balanceOf(communityVault);
-        communityVaultAccruedFeeToken1 = IERC20(algebraPool.token1()).balanceOf(communityVault);
+        address communityVaultAddress = algebraPool.communityVault();
+        communityVaultAccruedFeeToken0 = IERC20(algebraPool.token0()).balanceOf(communityVaultAddress);
+        communityVaultAccruedFeeToken1 = IERC20(algebraPool.token1()).balanceOf(communityVaultAddress);
 
         (uint128 communityFeePending0, uint128 communityFeePending1) = algebraPool.getCommunityFeePending();
         communityVaultAccruedFeeToken0 += communityFeePending0;
         communityVaultAccruedFeeToken1 += communityFeePending1;
 
-        uint16 algebraFee = IAlgebraCustomCommunityVault(communityVault).algebraFee();
+        uint16 algebraFee = IAlgebraCustomCommunityVault(communityVaultAddress).algebraFee();
         uint256 algebraFeeToken0 = communityVaultAccruedFeeToken0 * algebraFee / ALGEBRA_FEE_DENOMINATOR;
         uint256 algebraFeeToken1 = communityVaultAccruedFeeToken1 * algebraFee / ALGEBRA_FEE_DENOMINATOR;
         communityVaultAccruedFeeToken0 -= algebraFeeToken0;
         communityVaultAccruedFeeToken1 -= algebraFeeToken1;
     }
 
-    ///@notice total supply held
-    function totalSupply() public view returns (uint256 _totalSupply) {
+    ///@notice total liquidity in the active tick
+    function totalActiveSupply() public view returns (uint256 _totalActiveSupply) {
         (IERC20Minimal rewardTokenAdd, IERC20Minimal bonusRewardTokenAdd, IAlgebraPool pool, uint256 nonce) = 
             algebraEternalFarming.incentiveKeys(poolAddress);
         IncentiveKey memory incentivekey = IncentiveKey(rewardTokenAdd, bonusRewardTokenAdd, pool, nonce);
@@ -280,7 +274,7 @@ contract GaugeCL is ReentrancyGuard, Ownable {
         
         // set RewardRate to AlgebraVirtual Pool
         (,,address virtualPoolAddress,,,) = algebraEternalFarming.incentives(incentiveId);
-        _totalSupply = IAlgebraEternalVirtualPool(virtualPoolAddress).currentLiquidity();    
+        _totalActiveSupply = IAlgebraEternalVirtualPool(virtualPoolAddress).currentLiquidity();    
     }
 
 }

@@ -28,17 +28,17 @@ import '@cryptoalgebra/integral-farming/contracts/interfaces/IAlgebraEternalFarm
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 import {IAlgebraCLFactory} from "./interfaces/IAlgebraCLFactory.sol";
 
-contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
+contract GaugeManager is IGaugeManager, OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     address[] public pools;
     
     address public minter; 
     uint256 internal index; 
-    address internal base; 
+    address public base; 
     address public bribefactory; 
     address public _ve; 
     mapping(address => uint256) internal supplyIndex;              // gauge    => index
-    mapping(address => uint256) public claimable;                  // gauge    => claimable $the
+    mapping(address => uint256) public claimable;                  // gauge    => claimable $DEXTOKEN
     mapping(address => address) public gauges;                  // pool     => gauge
     mapping(address => uint256) public gaugesDistributionTimestmap;// gauge    => last Distribution Time
     mapping(address => address) public poolForGauge;            // gauge    => pool    
@@ -59,10 +59,8 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     mapping(address => bool) public isCLGauge;
     mapping(address => bool) public isAlive;                    // gauge    => boolean [is the gauge alive?]
     IGaugeManager.FarmingParam public farmingParam;
+    bytes16 public constant alphabet = "0123456789abcdef";
 
-    bytes32 public constant COMMUNITY_FEE_WITHDRAWER_ROLE = keccak256('COMMUNITY_FEE_WITHDRAWER');
-    bytes32 public constant COMMUNITY_FEE_VAULT_ADMINISTRATOR = keccak256('COMMUNITY_FEE_VAULT_ADMINISTRATOR');
-  
     event GaugeCreated(address indexed gauge, address creator, address internal_bribe, address indexed external_bribe, address indexed pool);
     event GaugeKilled(address indexed gauge);
     event GaugeRevived(address indexed gauge);
@@ -76,6 +74,8 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     event SetGaugeFactoryCL(address indexed old, address indexed latest);
     event SetPairFactory(address indexed old, address indexed latest);
     event SetPairFactoryCL(address indexed old, address indexed latest);
+    event SetVoter(address indexed old, address indexed latest);
+    event SetBlackGovernor(address indexed old, address indexed latest);
     mapping(address => uint256) public feeDistributionTimestmap;// gauge    => last Distribution Time
 
     constructor() {}
@@ -113,8 +113,8 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function setBribeFactory(address _bribeFactory) external GaugeAdmin {
         require(_bribeFactory.code.length > 0, "CODELEN");
         require(_bribeFactory != address(0), "ZA");
-        bribefactory = _bribeFactory;
         emit SetBribeFactory(bribefactory, _bribeFactory);
+        bribefactory = _bribeFactory;
     }
 
     /// @notice Set a new PermissionRegistry
@@ -137,6 +137,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function setVoter(address _voter) external GaugeAdmin{
         require(_voter.code.length > 0, "CODELEN");
         require(_voter != address(0), "ZA");
+        emit SetVoter(voter, _voter);
         voter = _voter;
     }
 
@@ -147,6 +148,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     function setBlackGovernor(address _blackGovernor) external GaugeAdmin {
         require(_blackGovernor != address(0), "ZA");
+        emit SetBlackGovernor(blackGovernor, _blackGovernor);
         blackGovernor = _blackGovernor;
     }
     
@@ -159,14 +161,14 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     ----------------------------------------------------------------------------- */
     /// @notice create multiple gauges
     function createGauges(address[] memory _pool, uint256[] memory _gaugeTypes) external nonReentrant returns(address[] memory, address[] memory, address[] memory)  {
-        require(_pool.length == _gaugeTypes.length, "MISMATCH_LEN");
-        require(_pool.length <= 10, "MAXVAL");
-        address[] memory _gauge = new address[](_pool.length);
-        address[] memory _int = new address[](_pool.length);
-        address[] memory _ext = new address[](_pool.length);
+        uint poolLen = _pool.length;
+        require(poolLen == _gaugeTypes.length, "MISMATCH_LEN");
+        require(poolLen <= 10, "MAXVAL");
+        address[] memory _gauge = new address[](poolLen);
+        address[] memory _int = new address[](poolLen);
+        address[] memory _ext = new address[](poolLen);
 
         uint i = 0;
-        uint poolLen = _pool.length;
         for(i; i < poolLen; i++){
             (_gauge[i], _int[i], _ext[i]) = _createGauge(_pool[i], _gaugeTypes[i], address(0));
         }
@@ -186,7 +188,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @notice create a gauge
     /// @param  _pool       LP address 
     /// @param  _gaugeType  the type of the gauge you want to create
-    /// @dev    To create stable/Volatile pair gaugeType = 0, Concentrated liqudity = 1, ...
+    /// @dev    To create stable/Volatile pair gaugeType = 0, Concentrated liquidity = 1, ...
     ///         Make sure to use the corrcet gaugeType or it will fail
 
     function _createGauge(address _pool, uint256 _gaugeType, address bonusRewardToken) internal returns (address _gauge, address _internal_bribe, address _external_bribe) {
@@ -241,7 +243,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             isCLGauge[_gauge] = true;
             setGaugeAsCommunityFeeReceiver(_gauge, _pool);
         }
-        // approve spending for $the
+        // approve spending for $DEXTOKEN
         IERC20(base).approve(_gauge, type(uint256).max);
         _saveBribeData(_pool, _gauge, _internal_bribe, _external_bribe);
         emit GaugeCreated(_gauge, msg.sender, _internal_bribe, _external_bribe, _pool);
@@ -257,8 +259,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         isAlive[_gauge] = true;
         pools.push(_pool);
 
-        // update index
-        // todo: below line will go to ve33 rewarder. 
+        // update index 
         supplyIndex[_gauge] = index; // new gauges are set to the default global state
     }
     
@@ -284,7 +285,6 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     function addressToString(address _addr) internal pure returns (string memory) {
         bytes20 value = bytes20(_addr);
-        bytes memory alphabet = "0123456789abcdef";
 
         bytes memory str = new bytes(42);
         str[0] = '0';
@@ -306,7 +306,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     /// @notice notify reward amount for gauge
-    /// @dev    the function is called by the minter each epoch. Anyway anyone can top up some extra rewards.
+    /// @dev    the function is called by the minter each epoch
     /// @param  amount  amount to distribute
     function notifyRewardAmount(uint256 amount) external {
         require(msg.sender == minter, "NA");
@@ -357,10 +357,10 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
                     address _token0 = algebraPool.token0();
                     address _token1 = algebraPool.token1();
                     address communityVault = algebraPool.communityVault();
-                    uint _balanceToken0 = IERC20(_token0).balanceOf(algebraPool.communityVault());
+                    uint _balanceToken0 = IERC20(_token0).balanceOf(communityVault);
                     IAlgebraCommunityVault(communityVault).withdraw(_token0, _balanceToken0);
                     
-                    uint _balanceToken1 = IERC20(_token1).balanceOf(algebraPool.communityVault());
+                    uint _balanceToken1 = IERC20(_token1).balanceOf(communityVault);
                     IAlgebraCommunityVault(communityVault).withdraw(_token1, _balanceToken1);
                     IGaugeCL(gauges[_pool]).claimFees();
                 }
@@ -434,7 +434,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
  
   
     /// @notice update info for gauges
-    /// @dev    this function track the gauge index to emit the correct $the amount after the distribution
+    /// @dev    this function track the gauge index to emit the correct $DEXTOKEN amount after the distribution
     function _updateForAfterDistribution(address _gauge) private {
         address _pool = poolForGauge[_gauge];
         //uint256 _supplied = weightsPerEpoch[_time][_pool];
@@ -444,7 +444,7 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         if (_supplied > 0) {
             uint256 _supplyIndex = supplyIndex[_gauge];
             uint256 _index = index; // get global index0 for accumulated distro
-            // SupplyIndex will be updated for Killed Gauges as well so we don't need to udpate index while reviving gauge.
+            // SupplyIndex will be updated for Killed Gauges as well so we don't need to update index while reviving gauge.
             supplyIndex[_gauge] = _index; // update _gauge current position to global position
             uint256 _delta = _index - _supplyIndex; // see if there is any difference that need to be accrued
             if (_delta > 0) {
@@ -477,10 +477,12 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         // Return claimable back to minter
         uint256 _claimable = claimable[_gauge];
+        claimable[_gauge] = 0;
         if (_claimable > 0) {
             IERC20Upgradeable(base).safeTransfer(minter, _claimable);
         }
-        claimable[_gauge] = 0;
+        // Reset allowance for killed gauge
+        IERC20(base).approve(_gauge, 0);
 
         // We shouldn't update totalWeight because if we decrease it other pools will get more emission while in current scenario 
         // emissionAmount of killed gauge will get transferred back to Minter
@@ -493,8 +495,11 @@ contract GaugeManager is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     /// @param  _gauge gauge to revive
     function reviveGauge(address _gauge) external Governance {
         require(!isAlive[_gauge], "ALIVE");
-        require(isGauge[_gauge], 'DEAD');
+        require(isGauge[_gauge], 'NOT_GAUGE');
         isAlive[_gauge] = true;
+
+        // Restore allowance for revived gauge
+        IERC20(base).approve(_gauge, type(uint256).max);
         emit GaugeRevived(_gauge);
     }
 

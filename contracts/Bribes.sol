@@ -14,7 +14,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract Bribe is ReentrancyGuard {
     using SafeERC20 for IERC20;
-    uint256 public WEEK; 
+    uint256 public immutable WEEK; 
 
     /* ========== STATE VARIABLES ========== */
 
@@ -35,7 +35,7 @@ contract Bribe is ReentrancyGuard {
     address public minter;
     address public immutable ve;
     address public owner;
-    ITokenHandler public tokenHandler;
+    ITokenHandler public immutable tokenHandler;
     uint8 public constant MAX_EPOCHS = 20;
 
     string public TYPE;
@@ -346,6 +346,5 @@ contract Bribe is ReentrancyGuard {
     event RewardAdded(address indexed rewardToken, uint256 reward, uint256 startTimestamp);
     event Staked(uint256 indexed tokenId, uint256 amount);
     event Withdrawn(uint256 indexed tokenId, uint256 amount);
-    event RewardPaid(address indexed user,address indexed rewardsToken,uint256 reward);
     event Recovered(address indexed token, uint256 amount);
 }

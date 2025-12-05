@@ -49,7 +49,6 @@ library BlackTimeLibrary {
         }
     }
 
-    /// @dev Returns duration in multiples of epoch
     function isLastEpoch(uint256 timestamp, uint256 endTime) internal pure returns (bool) {
         unchecked {
             return  endTime - WEEK <= timestamp && timestamp < endTime;
