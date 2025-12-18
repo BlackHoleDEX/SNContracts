@@ -146,8 +146,8 @@ contract VotingEscrow is IERC721, IERC721Metadata, IBlackHoleVotes {
                              METADATA STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    string constant public name = "veSNova";
-    string constant public symbol = "veSNOVA";
+    string constant public name = "veNova";
+    string constant public symbol = "veNOVA";
     string constant public version = "1.0.0";
     uint8 constant public decimals = 18;
 
