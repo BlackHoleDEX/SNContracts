@@ -43,7 +43,10 @@ contract PairFactory is IPairFactory, OwnableUpgradeable {
     }
     event AuthorizedAccountAdded(address indexed account);
     event AuthorizedAccountRemoved(address indexed account);
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _pairGenerator) public initializer {
         __Ownable_init();

@@ -55,7 +55,10 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     event GaugeManagerSet(address indexed oldGaugeManager, address indexed newGaugeManager);
     event RewardDistributorSet(address indexed oldRewardDistributor, address indexed newRewardDistributor);
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(    
         address __gaugeManager, // distribution system

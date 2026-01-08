@@ -33,7 +33,10 @@ contract RouterHelper is OwnableUpgradeable {
     IQuoterV2 public quoterV2;
     IAlgebraPoolAPIStorage public algebraPoolAPIStorage;
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
     
     function initialize(address _factory, address _quoterV2, address _algebraPoolAPIStorage) public initializer {
         __Ownable_init();

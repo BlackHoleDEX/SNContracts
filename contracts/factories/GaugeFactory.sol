@@ -21,7 +21,10 @@ contract GaugeFactory is IGaugeFactory, OwnableUpgradeable {
     event EmergencyActivated(address indexed gauge);
     event EmergencyDeactivated(address indexed gauge);
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _permissionRegistry) initializer  public {
         __Ownable_init();   //after deploy ownership to multisig

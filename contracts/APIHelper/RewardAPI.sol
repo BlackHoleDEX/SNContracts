@@ -31,7 +31,10 @@ contract RewardAPI is Initializable {
 
 
     
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _voter, address _gaugeManager) initializer public {
         owner = msg.sender;

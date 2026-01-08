@@ -9,6 +9,11 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 
 contract AlgebraPoolAPIStorage is Initializable, OwnableUpgradeable {
+    
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     IAlgebraCLFactory public algebraFactory;
     mapping(address => address) public pairToDeployer;

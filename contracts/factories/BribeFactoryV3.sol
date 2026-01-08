@@ -28,7 +28,10 @@ contract BribeFactoryV3 is OwnableUpgradeable {
         _;
     }
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _voter, address _gaugeManager, address _permissionsRegistry, address _tokenHandler) initializer  public {
         __Ownable_init();   //after deploy ownership to multisig

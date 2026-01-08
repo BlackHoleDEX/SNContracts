@@ -16,6 +16,11 @@ import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 
 
 contract AlgebraPoolAPI is Initializable {
+    
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     IAlgebraCLFactory public algebraFactory;
     INonfungiblePositionManager public nonfungiblePositionManager;
