@@ -14,21 +14,21 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {BlackTimeLibrary} from "./libraries/BlackTimeLibrary.sol";
 
 // codifies the minting rules as per ve(3,3), abstracted from the token to support any token that allows minting
-// 14 increment epochs followed by 52 decrement epochs after which we wil have vote based epochs
+// 4 increment epochs followed by 44 decrement epochs after which we wil have vote based epochs
 
 // NOTE: Inherits OwnableUpgradeable and maintains `team` variable for protocol administration and future extensibility, even if not all owner functions are currently used.
 contract MinterUpgradeable is IMinter, OwnableUpgradeable {
 
     uint public teamRate;  //EMISSION that goes to protocol
     uint public constant MAX_TEAM_RATE = 500; // 5%
-    uint256 public constant TAIL_START = 67; //TAIL EMISSIONS
+    uint256 public constant TAIL_START = 48; //TAIL EMISSIONS
     uint256 public tailEmissionRate; 
 
     uint256 public constant MAX_BPS = 10_000;
-    uint256 public constant WEEKLY_DECAY = 9_900; //for epoch 15 to 66 decay
-    uint256 public constant WEEKLY_GROWTH = 10_300; //for epoch 1 to 14 growth
-    uint256 public constant PROPOSAL_INCREASE = 10_100; // 1% increment after the 67th epoch based on proposal
-    uint256 public constant PROPOSAL_DECREASE = 9_900; // 1% decrement after the 67th epoch based on proposal
+    uint256 public constant WEEKLY_DECAY = 9_900; //for epoch 5 to 47 decay
+    uint256 public constant WEEKLY_GROWTH = 10_400; //for epoch 1 to 4 growth
+    uint256 public constant PROPOSAL_INCREASE = 10_100; // 1% increment after the 48th epoch based on proposal
+    uint256 public constant PROPOSAL_DECREASE = 9_900; // 1% decrement after the 48th epoch based on proposal
     address private constant burnTokenAddress = 0x000000000000000000000000000000000000dEaD;
 
     uint public WEEK; // allows minting once per week (reset every Thursday 00:00 UTC)
@@ -76,7 +76,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         _rewards_distributor = IRewardsDistributor(__rewards_distributor);
 
         active_period = ((block.timestamp + (2 * WEEK)) / WEEK) * WEEK;
-        weekly = 10_000_000 * 10**IERC20(address(_black)).decimals(); // represents a starting weekly[epoch 0] emission of 10M DEXTOKEN
+        weekly = 8_000_000 * 10**IERC20(address(_black)).decimals(); // represents a starting weekly[epoch 0] emission of 8M DEXTOKEN
 
     }
 
@@ -177,7 +177,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
                 weekly = _emission;
             } else {
                 _emission = _weekly;
-                if (epochCount < 15) {
+                if (epochCount < 5) {
                     _weekly = (_weekly * WEEKLY_GROWTH) / MAX_BPS;
                 } else {
                     _weekly = (_weekly * WEEKLY_DECAY) / MAX_BPS;

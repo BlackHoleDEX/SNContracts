@@ -6,7 +6,7 @@ import "./interfaces/ISuperNova.sol";
 contract SuperNova is ISuperNova {
 
     string public constant name = "SUPERNOVA";
-    string public constant symbol = "SNOVA";
+    string public constant symbol = "NOVA";
     uint8 public constant decimals = 18;
     uint public totalSupply = 0;
 
