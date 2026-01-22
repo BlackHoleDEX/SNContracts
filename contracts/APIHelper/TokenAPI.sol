@@ -17,7 +17,10 @@ contract TokenAPI is Initializable {
 
     ITokenHandler public tokenHandler;
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _tokenHandler) initializer public {
         tokenHandler = ITokenHandler(_tokenHandler);

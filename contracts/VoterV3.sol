@@ -42,7 +42,10 @@ contract VoterV3 is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     event SetMaxVotingNumber(uint256 old, uint256 latest);
     event SetGaugeManager(address indexed old, address indexed latest);
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     // function initialize(address __ve, address _pairFactory, address  _gaugeFactory, address _bribes, address _tokenHandler) initializer public {
     function initialize(

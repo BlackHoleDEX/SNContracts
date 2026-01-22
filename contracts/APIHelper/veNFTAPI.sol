@@ -273,7 +273,7 @@ contract veNFTAPI {
         uint256 nftId;
 
         for(uint i = startLockIndex; i < endLockIndex; i++){ // need to be amounts right
-            nftId = ve.tokenOfOwnerByIndex(_user, i);   
+            nftId = ve.tokenOfOwnerByIndex(_user, i);
             _lockReward[i-startLockIndex].id = nftId;
             _lockReward[i-startLockIndex].lockedAmount = uint128(ve.locked(nftId).amount);
             (_lockReward[i-startLockIndex].pairRewards) = _getRewardsForNft(nftId, _gaugeBatchSize, _gaugeOffset);
@@ -282,11 +282,11 @@ contract veNFTAPI {
     function _getRewardsForNft(uint nftId, uint _gaugeBatchSize, uint _gaugeOffset) internal view returns (PairReward[] memory pairReward) {
         uint basicPoolGaugeLength = gaugeFactory.length();
         uint clPoolGaugeLength = gaugeFactoryCL.length();
-        
+
         // Calculate the actual range to process
         uint startIdx = _gaugeOffset;
         uint endIdx = _gaugeOffset + _gaugeBatchSize;
-        
+
         // Check if there are more gauges beyond this batch and cap endIdx
         endIdx = (endIdx < basicPoolGaugeLength + clPoolGaugeLength) ? endIdx : (basicPoolGaugeLength + clPoolGaugeLength);
         uint maxPairRewardCount = 0;

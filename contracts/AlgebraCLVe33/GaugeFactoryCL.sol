@@ -34,7 +34,10 @@ contract GaugeFactoryCL is IGaugeFactoryCL, OwnableUpgradeable {
     uint256 public dibsPercentage; // 0%
     
     address public gaugeManager;
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address _permissionRegistry) initializer  public {
         __Ownable_init();   //after deploy ownership to multisig

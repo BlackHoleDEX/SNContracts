@@ -78,7 +78,10 @@ contract GaugeManager is IGaugeManager, OwnableUpgradeable, ReentrancyGuardUpgra
     event SetBlackGovernor(address indexed old, address indexed latest);
     mapping(address => uint256) public feeDistributionTimestmap;// gauge    => last Distribution Time
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(address __ve, address _tokenHandler, address _gaugeFactory, address _gaugeFactoryCL, 
                         address _pairFactory, address _pairFactoryCL, address _permissionRegistory) initializer public {

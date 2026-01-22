@@ -9,7 +9,10 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 contract VeArtProxyUpgradeable is IVeArtProxy, OwnableUpgradeable {
 
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize() initializer public {
         __Ownable_init();
