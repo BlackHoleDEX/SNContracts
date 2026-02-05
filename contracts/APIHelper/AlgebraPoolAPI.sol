@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 pragma solidity ^0.8.13;
 
-import "@cryptoalgebra/integral-core/contracts/interfaces/plugin/IAlgebraDynamicFeePlugin.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import '../interfaces/IAlgebraCLFactory.sol';
-import '../interfaces/IBribeAPI.sol';
+import '@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol';
+import '@cryptoalgebra/integral-core/contracts/libraries/Plugins.sol';
+import '@cryptoalgebra/integral-periphery/contracts/interfaces/INonfungiblePositionManager.sol';
+import '../interfaces/IDynamicFeeManager.sol';
 import '../interfaces/IERC20.sol';
 import '../interfaces/IGaugeCL.sol';
 import '../interfaces/IGaugeManager.sol';
 
 import '../interfaces/IVoter.sol';
+import '../interfaces/IAlgebraCLFactory.sol';
+import '../interfaces/IBribeAPI.sol';
 import '../interfaces/IVotingEscrow.sol';
-import '@cryptoalgebra/integral-core/contracts/interfaces/IAlgebraPool.sol';
-import '@cryptoalgebra/integral-core/contracts/libraries/Plugins.sol';
-import '@cryptoalgebra/integral-periphery/contracts/interfaces/INonfungiblePositionManager.sol';
 import {BlackTimeLibrary} from "../libraries/BlackTimeLibrary.sol";
 
 
@@ -200,7 +200,8 @@ contract AlgebraPoolAPI is Initializable {
         uint8 pluginConfig;
         (info.sqrtPriceX96, info.tick, , pluginConfig, , ) = pool.globalState();
         if (Plugins.hasFlag(pluginConfig, Plugins.DYNAMIC_FEE)) {
-            info.fee = IAlgebraDynamicFeePlugin(pool.plugin()).getCurrentFee();
+            (uint16 alpha1, , , , , , uint16 baseFee) = IDyanmicFeeManager(pool.plugin()).feeConfig();
+            info.fee = baseFee + alpha1;
         } else {
             info.fee = pool.fee();
         }

@@ -3,8 +3,8 @@ pragma solidity 0.8.13;
 
 library BlackTimeLibrary {
 
-    uint256 internal constant WEEK = 7 * 86400;
-    uint internal constant NO_VOTING_WINDOW = 3600;
+    uint256 internal constant WEEK = 86400 * 7;
+    uint internal constant NO_VOTING_WINDOW = 3 * 3600;
     uint256 internal constant MAX_LOCK_DURATION = 86400 * 365 * 4;
 
     /// @dev Returns start of epoch based on current timestamp
@@ -49,6 +49,7 @@ library BlackTimeLibrary {
         }
     }
 
+    /// @dev Returns duration in multiples of epoch
     function isLastEpoch(uint256 timestamp, uint256 endTime) internal pure returns (bool) {
         unchecked {
             return  endTime - WEEK <= timestamp && timestamp < endTime;
