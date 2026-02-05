@@ -1,6 +1,6 @@
 ## Attribution
 
-Blackhole is built on the shoulders of giants. This project adapts and extends open-source work from the following protocols:
+Supernova is built on the shoulders of giants. This project is built over the [Blackhole contracts](https://github.com/BlackHoleDEX/Contracts) and adapts and extends open-source work from the following protocols:
 
 - [Thena v2](https://github.com/ThenafiBNB/THENA-Contracts) – built on the Solidly model
 - [Algebra Integral](https://github.com/cryptoalgebra/Algebra) – modular concentrated liquidity engine
