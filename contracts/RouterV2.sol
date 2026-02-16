@@ -517,7 +517,9 @@ contract RouterV2 is ReentrancyGuard {
             );
         }
         else{
-            IERC20(routes[0].from).transferFrom(msg.sender, address(this), amounts[0]);
+             _safeTransferFrom(
+                routes[0].from, msg.sender, address(this), amounts[0]
+            );
             if (IERC20(routes[0].from).allowance(address(this), swapRouter) < amounts[0]) {
                 IERC20(routes[0].from).forceApprove(swapRouter, amounts[0]);
             }
@@ -559,7 +561,9 @@ contract RouterV2 is ReentrancyGuard {
             );
         }
         else{
-            IERC20(routes[0].from).transferFrom(msg.sender, address(this), amounts[0]);
+             _safeTransferFrom(
+                routes[0].from, msg.sender, address(this), amounts[0]
+            );
             if (IERC20(routes[0].from).allowance(address(this), swapRouter) < amounts[0]) {
                 IERC20(routes[0].from).forceApprove(swapRouter, amounts[0]);
             }
